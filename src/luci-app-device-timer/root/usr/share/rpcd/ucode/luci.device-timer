@@ -1,0 +1,604 @@
+'use strict';
+
+import { cursor } from 'uci';
+import { popen, open, access } from 'fs';
+
+const validation = call(loadfile('/usr/share/ucode/device_timer/validate.uc'));
+const calibration = call(loadfile('/usr/share/ucode/device_timer/calibration.uc'));
+
+const TEMP_DIR = '/tmp/device_timer';
+
+// Shell escape for safe command execution (prevents injection)
+function shellquote(s) {
+    if (s == null) s = '';
+    return "'" + replace(s, "'", "'\\''") + "'";
+}
+
+// Validate device ID (UCI section names: alphanumeric + underscore only)
+function isValidId(id) {
+    return id && match(id, /^[a-zA-Z0-9_]+$/);
+}
+
+// Get current local time (uses /etc/TZ via musl localtime)
+// Returns: { wday: 0-6, hour: 0-23, min: 0-59 }
+function getLocalTime() {
+    const now = localtime(time());
+    return { wday: now.wday, hour: now.hour, min: now.min };
+}
+
+// Get active schedule for today
+// Returns: { status: 'active'|'no_schedule'|'outside_window', timerange: string|null, limit: int|null }
+// Format: "Mon,14:00-18:00,60" (Day,TimeRange,Limit)
+function getActiveSchedule(scheduleList) {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const now = getLocalTime();
+    const today = days[now.wday % 7];
+
+    if (!scheduleList || !length(scheduleList)) {
+        return { status: 'no_schedule', timerange: null, limit: null };
+    }
+
+    // Collect all schedules for today
+    let todaysSchedules = [];
+    for (let i = 0; i < length(scheduleList); i++) {
+        let entry = scheduleList[i];
+        const parts = split(entry, ',');
+        // Format: "Mon,14:00-18:00,60" (all 3 parts required)
+        if (length(parts) === 3 && parts[0] === today) {
+            // Validate limit is numeric (0 = unlimited, 1+ = limit in minutes)
+            if (!match(parts[2], /^(0|[1-9][0-9]*)$/)) {
+                continue; // Skip invalid schedule entries
+            }
+            push(todaysSchedules, {
+                timerange: parts[1],
+                limit: int(parts[2])
+            });
+        }
+    }
+
+    if (!length(todaysSchedules)) {
+        return { status: 'no_schedule', timerange: null, limit: null };
+    }
+
+    // Find the active time window (inline to avoid rpcd function call issues)
+    for (let i = 0; i < length(todaysSchedules); i++) {
+        let schedule = todaysSchedules[i];
+        let tr = schedule.timerange;
+
+        // Check if current time is within window
+        let inWindow = false;
+        if (tr) {
+            let currentMinutes = now.hour * 60 + now.min;
+
+            let rangeParts = split(tr, '-');
+            if (length(rangeParts) == 2) {
+                let startParts = split(rangeParts[0], ':');
+                let endParts = split(rangeParts[1], ':');
+
+                if (length(startParts) == 2 && length(endParts) == 2) {
+                    let startMinutes = int(startParts[0]) * 60 + int(startParts[1]);
+                    let endMinutes = int(endParts[0]) * 60 + int(endParts[1]);
+
+                    if (startMinutes <= endMinutes) {
+                        // Normal case: e.g., 14:00-18:00
+                        inWindow = (currentMinutes >= startMinutes && currentMinutes < endMinutes);
+                    } else {
+                        // Overnight case: e.g., 22:00-06:00
+                        inWindow = (currentMinutes >= startMinutes || currentMinutes < endMinutes);
+                    }
+                }
+            }
+        }
+
+        if (inWindow) {
+            return {
+                status: 'active',
+                timerange: tr,
+                limit: schedule.limit
+            };
+        }
+    }
+
+    // Today has schedules, but none is currently active
+    return { status: 'outside_window', timerange: null, limit: null };
+}
+
+// Resolve IP address from MAC via ARP table or DHCP leases
+function resolveIpFromMac(mac) {
+    if (!mac) return null;
+
+    // Normalize MAC to lowercase for comparison
+    const macLower = lc(mac);
+
+    // Try ARP table first (ip neigh)
+    const arpProc = popen('ip neigh show 2>/dev/null', 'r');
+    if (arpProc) {
+        let line;
+        while ((line = arpProc.read('line')) !== null) {
+            // Format: "192.168.1.1 dev eth0 lladdr aa:bb:cc:dd:ee:ff REACHABLE"
+            const parts = split(trim(line), ' ');
+            if (length(parts) >= 5 && lc(parts[4]) === macLower) {
+                arpProc.close();
+                return parts[0];
+            }
+        }
+        arpProc.close();
+    }
+
+    // Fallback to DHCP leases
+    const uci = cursor();
+    let leasefile = uci.get('dhcp', '@dnsmasq[0]', 'leasefile');
+    // Fallback: read from generated dnsmasq config
+    if (!leasefile || !access(leasefile, 'r')) {
+        const dnsmasqConf = popen("grep -sh 'dhcp-leasefile=' /var/etc/dnsmasq.conf.* 2>/dev/null | head -1 | cut -d= -f2", 'r');
+        if (dnsmasqConf) {
+            const path = trim(dnsmasqConf.read('all') || '');
+            dnsmasqConf.close();
+            if (path) leasefile = path;
+        }
+    }
+
+    const leaseFile = (leasefile && access(leasefile, 'r')) ? open(leasefile, 'r') : null;
+    if (leaseFile) {
+        let line;
+        while ((line = leaseFile.read('line')) !== null) {
+            // Format: "1234567890 aa:bb:cc:dd:ee:ff 192.168.1.1 hostname *"
+            const parts = split(trim(line), ' ');
+            if (length(parts) >= 3 && lc(parts[1]) === macLower) {
+                leaseFile.close();
+                return parts[2];
+            }
+        }
+        leaseFile.close();
+    }
+
+    return null;
+}
+
+// Read state.json and return parsed state
+function readState() {
+    const stateFile = TEMP_DIR + '/state.json';
+    const file = open(stateFile, 'r');
+    if (!file) return { version: 1, devices: {} };
+    const content = file.read('all');
+    file.close();
+    if (!content) return { version: 1, devices: {} };
+    const parsed = json(content);
+    return parsed || { version: 1, devices: {} };
+}
+
+// Read usage from state.json (state stores seconds, return minutes)
+function readUsageFile(deviceId) {
+    if (!isValidId(deviceId)) return 0;
+    const state = readState();
+    if (!state.devices || !state.devices[deviceId]) return 0;
+    const usageSeconds = state.devices[deviceId].usage;
+    if (!usageSeconds || usageSeconds <= 0) return 0;
+    return int(usageSeconds / 60);
+}
+
+// Method: Get all devices
+function getDevices() {
+    const uci = cursor();
+    const devices = [];
+    const state = readState();
+
+    uci.foreach('device_timer', 'device', (s) => {
+        const id = s['.name'];
+        const usageMinutes = readUsageFile(id);
+        const deviceEnabled = (s.enabled === '0') ? 0 : 1;
+
+        // Read flatrate from state
+        const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
+        const flatrateActive = (deviceState.flatrate === 1) ? 1 : 0;
+
+        // Get schedule list (array of "Day,HH:MM-HH:MM,Limit")
+        // Handle both array (uci add_list) and string (uci set) cases
+        let scheduleList = [];
+        if (s.schedule && type(s.schedule) === 'array') {
+            scheduleList = s.schedule;
+        } else if (s.schedule && type(s.schedule) === 'string') {
+            scheduleList = [s.schedule];
+        }
+        const activeSchedule = getActiveSchedule(scheduleList);
+
+        const hasScheduleToday = (activeSchedule.status !== 'no_schedule');
+        const inTimeWindow = (activeSchedule.status === 'active');
+        const timeLimit = activeSchedule.limit || 0;
+
+        let status = 'inactive';
+        if (!deviceEnabled) {
+            status = 'disabled';
+        } else if (activeSchedule.status === 'no_schedule') {
+            status = 'no_schedule';
+        } else if (activeSchedule.status === 'outside_window') {
+            status = 'outside_window';
+        } else if (flatrateActive === 1 || timeLimit === 0) {
+            status = 'unlimited';
+        } else if (usageMinutes >= timeLimit) {
+            status = 'blocked';
+        } else {
+            status = 'active';
+        }
+
+        const mac = s.mac || '';
+        const ip = resolveIpFromMac(mac);
+
+        push(devices, {
+            id: id,
+            name: s.name || 'Unknown',
+            ip: ip,
+            mac: mac,
+            schedule: scheduleList,
+            todays_limit: timeLimit,
+            usage_minutes: usageMinutes,
+            enabled: deviceEnabled,
+            status: status,
+            has_schedule_today: hasScheduleToday ? 1 : 0,
+            in_time_window: inTimeWindow ? 1 : 0,
+            todays_timerange: activeSchedule.timerange,
+            traffic_threshold: s.traffic_threshold || null,
+            flatrate_active: flatrateActive
+        });
+    });
+
+    return { devices: devices };
+}
+
+// Method: Get single device
+function getDevice(request) {
+    const id = (request.args && request.args.id) ? request.args.id : null;
+    if (!id) return { error: 'Missing device id' };
+    if (!isValidId(id)) return { error: 'Invalid device id' };
+
+    const uci = cursor();
+    const s = uci.get_all('device_timer', id);
+    if (!s || s['.type'] !== 'device') return { error: 'Device not found' };
+
+    const usageMinutes = readUsageFile(id);
+    const deviceEnabled = (s.enabled === '0') ? 0 : 1;
+
+    // Read flatrate from state
+    const state = readState();
+    const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
+    const flatrateActive = (deviceState.flatrate === 1) ? 1 : 0;
+
+    // Get schedule list (array of "Day,HH:MM-HH:MM,Limit")
+    // Handle both array (uci add_list) and string (uci set) cases
+    let scheduleList = [];
+    if (s.schedule && type(s.schedule) === 'array') {
+        scheduleList = s.schedule;
+    } else if (s.schedule && type(s.schedule) === 'string') {
+        scheduleList = [s.schedule];
+    }
+    const activeSchedule = getActiveSchedule(scheduleList);
+
+    const hasScheduleToday = (activeSchedule.status !== 'no_schedule');
+    const inTimeWindow = (activeSchedule.status === 'active');
+    const timeLimit = activeSchedule.limit || 0;
+
+    let status = 'inactive';
+    if (!deviceEnabled) {
+        status = 'disabled';
+    } else if (activeSchedule.status === 'no_schedule') {
+        status = 'no_schedule';
+    } else if (activeSchedule.status === 'outside_window') {
+        status = 'outside_window';
+    } else if (flatrateActive === 1 || timeLimit === 0) {
+        status = 'unlimited';
+    } else if (usageMinutes >= timeLimit) {
+        status = 'blocked';
+    } else {
+        status = 'active';
+    }
+
+    const mac = s.mac || '';
+    const ip = resolveIpFromMac(mac);
+
+    return {
+        id: id,
+        name: s.name || 'Unknown',
+        ip: ip,
+        mac: mac,
+        schedule: scheduleList,
+        todays_limit: timeLimit,
+        usage_minutes: usageMinutes,
+        enabled: deviceEnabled,
+        status: status,
+        has_schedule_today: hasScheduleToday ? 1 : 0,
+        in_time_window: inTimeWindow ? 1 : 0,
+        todays_timerange: activeSchedule.timerange,
+        traffic_threshold: s.traffic_threshold || null,
+        flatrate_active: flatrateActive
+    };
+}
+
+// Single-writer: only the daemon writes state.json.
+// rpcd queues commands via state.json.rpc for daemon processing.
+function queueRpcUpdate(command) {
+    const rpcFile = TEMP_DIR + '/state.json.rpc';
+    const lockFile = TEMP_DIR + '/state.lock';
+    const pidFile = '/var/run/device_timer.pid';
+
+    system('mkdir -p ' + shellquote(TEMP_DIR));
+
+    // Atomic append with flock
+    system('flock ' + shellquote(lockFile) + ' -c ' +
+           shellquote('printf \'%s\\n\' ' + shellquote(command) +
+                      ' >> ' + shellquote(rpcFile)));
+
+    // Wake daemon via SIGUSR1
+    const pf = open(pidFile, 'r');
+    if (pf) {
+        const pid = trim(pf.read('all'));
+        pf.close();
+        if (pid && match(pid, /^[0-9]+$/)) {
+            system('kill -USR1 ' + pid + ' 2>/dev/null');
+        }
+    }
+}
+
+// Method: Reset device counter
+function resetDevice(request) {
+    const id = (request.args && request.args.id) ? request.args.id : null;
+    if (!id) return { error: 'Missing device id' };
+    if (!isValidId(id)) return { error: 'Invalid device id' };
+
+    // Verify device exists
+    const uci = cursor();
+    const s = uci.get_all('device_timer', id);
+    if (!s || s['.type'] !== 'device') {
+        return { error: 'Device not found' };
+    }
+
+    queueRpcUpdate('RPC_RESET\t' + id);
+
+    return {
+        success: true,
+        id: id,
+        message: 'Counter reset successfully'
+    };
+}
+
+// Method: Set flatrate for a device
+function setFlatrate(request) {
+    const id = (request.args && request.args.id) ? request.args.id : null;
+    const enabled = (request.args && request.args.enabled != null) ? request.args.enabled : null;
+
+    if (!id) return { error: 'Missing device id' };
+    if (enabled === null) return { error: 'Missing enabled parameter' };
+    if (!isValidId(id)) return { error: 'Invalid device id' };
+
+    const enabledInt = int(enabled);
+    if (enabledInt !== 0 && enabledInt !== 1) {
+        return { error: 'Invalid enabled value (must be 0 or 1)' };
+    }
+
+    // Verify device exists
+    const uci = cursor();
+    const s = uci.get_all('device_timer', id);
+    if (!s || s['.type'] !== 'device') {
+        return { error: 'Device not found' };
+    }
+
+    queueRpcUpdate('RPC_FLATRATE\t' + id + '\t' + enabledInt);
+
+    return {
+        success: true,
+        id: id,
+        flatrate: enabledInt,
+        message: enabledInt ? 'Flatrate enabled' : 'Flatrate disabled'
+    };
+}
+
+// Method: Get global settings
+function getSettings() {
+    const uci = cursor();
+    return {
+        enabled: int(uci.get('device_timer', 'settings', 'enabled')) || 0,
+        default_threshold: uci.get('device_timer', 'settings', 'default_threshold') || '6M',
+        poll_interval: int(uci.get('device_timer', 'settings', 'poll_interval')) || 60
+    };
+}
+
+// Method: Get daemon status
+function getDaemonStatus() {
+    const pidFile = '/var/run/device_timer.pid';
+    const lastDateFile = TEMP_DIR + '/last_date';
+
+    let running = false;
+    let pid = null;
+    let lastResetDate = null;
+
+    // Read PID file
+    const pf = open(pidFile, 'r');
+    if (pf) {
+        const content = pf.read('all');
+        pf.close();
+        pid = int(trim(content));
+
+        // Check if process exists via /proc
+        if (pid > 0 && access('/proc/' + pid, 'r')) {
+            running = true;
+        } else {
+            pid = null;
+        }
+    }
+
+    // Read last reset date
+    const df = open(lastDateFile, 'r');
+    if (df) {
+        lastResetDate = trim(df.read('all'));
+        df.close();
+    }
+
+    const uci = cursor();
+    const pollInterval = int(uci.get('device_timer', 'settings', 'poll_interval')) || 60;
+
+    return {
+        running: running,
+        pid: pid,
+        poll_interval: pollInterval,
+        last_reset_date: lastResetDate
+    };
+}
+
+// Method: Validate schedule list for overlaps (delegates to shared module)
+function validateSchedules(request) {
+    const schedules = (request.args && request.args.schedules) ? request.args.schedules : null;
+    return validation.validateScheduleList(schedules);
+}
+
+// Method: Start calibration
+function startCalibration(request) {
+    const id = (request.args && request.args.id) ? request.args.id : null;
+    const duration = (request.args && request.args.duration != null) ? request.args.duration : 1800;
+    const sampleInterval = (request.args && request.args.sample_interval != null) ? request.args.sample_interval : 10;
+
+    if (!id) return { error: 'Missing device id' };
+    if (!isValidId(id)) return { error: 'Invalid device id' };
+
+    const durationInt = int(duration);
+    const intervalInt = int(sampleInterval);
+    const validation = calibration.validateCalibrationParams(durationInt, intervalInt);
+    if (!validation.valid) {
+        return { error: validation.error };
+    }
+
+    const uci = cursor();
+    const s = uci.get_all('device_timer', id);
+    if (!s || s['.type'] !== 'device') {
+        return { error: 'Device not found' };
+    }
+    if (s.enabled === '0') {
+        return { error: 'Device must be enabled for calibration' };
+    }
+
+    queueRpcUpdate('RPC_CAL_START\t' + id + '\t' + durationInt + '\t' + intervalInt);
+
+    return {
+        success: true,
+        id: id,
+        duration: durationInt,
+        sample_interval: intervalInt,
+        message: 'Calibration started'
+    };
+}
+
+// Method: Get calibration status
+function getCalibration(request) {
+    const id = (request.args && request.args.id) ? request.args.id : null;
+    if (!id) return { error: 'Missing device id' };
+    if (!isValidId(id)) return { error: 'Invalid device id' };
+
+    const state = readState();
+    const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
+    const cal = (deviceState.calibration) ? deviceState.calibration : null;
+
+    if (!cal) {
+        return {
+            id: id,
+            status: 'idle',
+            elapsed: 0,
+            duration: 0,
+            sample_count: 0,
+            progress_percent: 0
+        };
+    }
+
+    const currentTime = time();
+    const elapsed = (cal.status === 'running') ? (currentTime - cal.start_time) : cal.duration;
+    const progressPercent = (cal.duration > 0) ? int((elapsed * 100) / cal.duration) : 0;
+
+    return {
+        id: id,
+        status: cal.status,
+        elapsed: elapsed,
+        duration: cal.duration || 0,
+        sample_interval: cal.sample_interval || 10,
+        sample_count: (cal.samples && length(cal.samples)) ? length(cal.samples) : 0,
+        progress_percent: (progressPercent > 100) ? 100 : progressPercent,
+        result_p90: cal.result_p90 || 0,
+        result_recommended: cal.result_recommended || 0,
+        error_message: cal.error_message || ''
+    };
+}
+
+// Method: Apply calibration result
+function applyCalibration(request) {
+    const id = (request.args && request.args.id) ? request.args.id : null;
+    if (!id) return { error: 'Missing device id' };
+    if (!isValidId(id)) return { error: 'Invalid device id' };
+
+    // Read-only: validate calibration status
+    const state = readState();
+    const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
+    const cal = (deviceState.calibration) ? deviceState.calibration : null;
+
+    if (!cal || cal.status !== 'completed') {
+        return { error: 'No completed calibration found' };
+    }
+
+    if (!cal.result_recommended || cal.result_recommended <= 0) {
+        return { error: 'Invalid calibration result' };
+    }
+
+    const thresholdStr = calibration.formatThreshold(cal.result_recommended);
+
+    // UCI write stays in rpcd (not state.json)
+    const uci = cursor();
+    uci.set('device_timer', id, 'traffic_threshold', thresholdStr);
+    if (!uci.commit('device_timer')) {
+        return { success: false, error: 'Failed to commit UCI changes' };
+    }
+
+    // Clear calibration state via daemon
+    queueRpcUpdate('RPC_CAL_CLEAR\t' + id);
+
+    return {
+        success: true,
+        id: id,
+        threshold: thresholdStr,
+        message: 'Threshold applied successfully'
+    };
+}
+
+// Method: Cancel calibration
+function cancelCalibration(request) {
+    const id = (request.args && request.args.id) ? request.args.id : null;
+    if (!id) return { error: 'Missing device id' };
+    if (!isValidId(id)) return { error: 'Invalid device id' };
+
+    // Read-only: validate calibration is running
+    const state = readState();
+    const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
+
+    if (!deviceState.calibration || deviceState.calibration.status !== 'running') {
+        return { error: 'No running calibration to cancel' };
+    }
+
+    queueRpcUpdate('RPC_CAL_CLEAR\t' + id);
+
+    return {
+        success: true,
+        id: id,
+        message: 'Calibration cancelled'
+    };
+}
+
+// Export methods
+const methods = {
+    devices: { call: getDevices },
+    device: { args: { id: 'id' }, call: getDevice },
+    reset: { args: { id: 'id' }, call: resetDevice },
+    setflatrate: { args: { id: 'id', enabled: 1 }, call: setFlatrate },
+    settings: { call: getSettings },
+    status: { call: getDaemonStatus },
+    validate: { args: { schedules: [] }, call: validateSchedules },
+    startcalibration: { args: { id: 'id', duration: 1800, sample_interval: 10 }, call: startCalibration },
+    getcalibration: { args: { id: 'id' }, call: getCalibration },
+    applycalibration: { args: { id: 'id' }, call: applyCalibration },
+    cancelcalibration: { args: { id: 'id' }, call: cancelCalibration }
+};
+
+return { 'luci.device-timer': methods };

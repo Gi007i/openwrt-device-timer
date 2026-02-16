@@ -1,0 +1,21 @@
+# DEV files
+.claude
+claude.md
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment / Secrets
+.env
+.env.*
+*.pem
+*.key

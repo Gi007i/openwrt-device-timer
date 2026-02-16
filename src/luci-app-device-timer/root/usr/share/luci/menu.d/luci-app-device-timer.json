@@ -1,0 +1,28 @@
+{
+	"admin/services/device_timer": {
+		"title": "Device Timer",
+		"order": 60,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [ "luci-app-device-timer" ]
+		}
+	},
+	"admin/services/device_timer/status": {
+		"title": "Status",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "device_timer/status"
+		}
+	},
+	"admin/services/device_timer/config": {
+		"title": "Configuration",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "device_timer/config"
+		}
+	}
+}

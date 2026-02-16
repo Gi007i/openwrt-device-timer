@@ -1,0 +1,25 @@
+{
+	"luci-app-device-timer": {
+		"description": "Grant access to Device Timer application",
+		"read": {
+			"file": {
+				"/tmp/device_timer/*": [ "read" ],
+				"/proc/*": [ "read" ]
+			},
+			"ubus": {
+				"luci.device-timer": [ "devices", "device", "settings", "status", "validate", "getcalibration" ],
+				"luci-rpc": [ "getHostHints" ]
+			},
+			"uci": [ "device_timer" ]
+		},
+		"write": {
+			"file": {
+				"/tmp/device_timer/*": [ "write" ]
+			},
+			"ubus": {
+				"luci.device-timer": [ "reset", "setflatrate", "startcalibration", "applycalibration", "cancelcalibration" ]
+			},
+			"uci": [ "device_timer", "firewall" ]
+		}
+	}
+}

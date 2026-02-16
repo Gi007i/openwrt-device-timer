@@ -1,0 +1,252 @@
+# German translation for Device Timer LuCI Application
+# Copyright (C) 2026
+# This file is distributed under the same license as the luci-app-device-timer package.
+#
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: de\n"
+
+msgid "Active"
+msgstr "Aktiv"
+
+msgid "Add Device"
+msgstr "Gerät hinzufügen"
+
+msgid "Advanced"
+msgstr "Erweitert"
+
+msgid "Blocked"
+msgstr "Blockiert"
+
+msgid "Daemon Status"
+msgstr "Daemon-Status"
+
+msgid "Days:"
+msgstr "Tage:"
+
+msgid "Default Traffic Threshold"
+msgstr "Standard Traffic-Schwellwert"
+
+msgid "Device ID"
+msgstr "Geräte-ID"
+
+msgid "Device Timer"
+msgstr "Geräte-Timer"
+
+msgid "Device Timer Configuration"
+msgstr "Geräte-Timer Konfiguration"
+
+msgid "Disabled"
+msgstr "Deaktiviert"
+
+msgid "Edit Device"
+msgstr "Gerät bearbeiten"
+
+msgid "Enable Monitoring"
+msgstr "Überwachung aktivieren"
+
+msgid "Enable or disable the entire monitoring system."
+msgstr "Das gesamte Überwachungssystem aktivieren oder deaktivieren."
+
+msgid "Enabled"
+msgstr "Aktiviert"
+
+msgid "Example:"
+msgstr "Beispiel:"
+
+msgid "Format:"
+msgstr "Format:"
+
+msgid "General"
+msgstr "Allgemein"
+
+msgid "Global Settings"
+msgstr "Globale Einstellungen"
+
+msgid "Global settings for device usage monitoring."
+msgstr "Globale Einstellungen für die Gerätenutzungsüberwachung."
+
+msgid "How often the daemon checks device activity (in seconds)."
+msgstr "Wie oft der Daemon die Geräteaktivität prüft (in Sekunden)."
+
+msgid "Internet access schedule per day."
+msgstr "Internet-Zeitplan pro Tag."
+
+msgid "Invalid format: %s"
+msgstr "Ungültiges Format: %s"
+
+msgid "Invalid format. Use: Day,HH:MM-HH:MM,Limit in min (e.g., Mon,14:00-18:00,60 or Mon,06:00-22:00,0 for unlimited)"
+msgstr "Ungültiges Format. Verwenden Sie: Tag,HH:MM-HH:MM,Limit in Min. (z.B. Mon,14:00-18:00,60 oder Mon,06:00-22:00,0 für unbegrenzt)"
+
+msgid "IP"
+msgstr "IP"
+
+msgid "Last Reset"
+msgstr "Letzter Reset"
+
+msgid "MAC"
+msgstr "MAC"
+
+msgid "MAC Address"
+msgstr "MAC-Adresse"
+
+msgid "Minimum traffic to count as active usage, e.g., 6M or 500K."
+msgstr "Minimaler Traffic für aktive Nutzung, z.B. 6M oder 500K."
+
+msgid "Monitor and manage device usage times."
+msgstr "Gerätenutzungszeiten überwachen und verwalten."
+
+msgid "Monitored Devices"
+msgstr "Überwachte Geräte"
+
+msgid "Monitoring"
+msgstr "Überwachung"
+
+msgid "Name"
+msgstr "Name"
+
+msgid "No Schedule"
+msgstr "Kein Zeitplan"
+
+msgid "Non-overlapping time windows per day."
+msgstr "Nicht überlappende Zeitfenster pro Tag."
+
+msgid "Outside Window"
+msgstr "Außerhalb Zeitfenster"
+
+msgid "Overlapping schedules on %s: %s and %s"
+msgstr "Überlappende Zeitpläne am %s: %s und %s"
+
+msgid "Override global threshold, e.g., 6M or 500K."
+msgstr "Globalen Schwellwert überschreiben, z.B. 6M oder 500K."
+
+msgid "Poll Interval"
+msgstr "Abfrageintervall"
+
+msgid "Remaining"
+msgstr "Verbleibend"
+
+msgid "Required for reliable device blocking."
+msgstr "Erforderlich für zuverlässige Gerätesperrung."
+
+msgid "Running"
+msgstr "Läuft"
+
+msgid "Schedule"
+msgstr "Zeitplan"
+
+msgid "seconds"
+msgstr "Sekunden"
+
+msgid "Service Status"
+msgstr "Dienststatus"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "Stopped"
+msgstr "Gestoppt"
+
+msgid "Traffic Threshold"
+msgstr "Traffic-Schwellwert"
+
+msgid "Invalid format, use e.g., 6M or 500K"
+msgstr "Ungültiges Format, verwenden Sie z.B. 6M oder 500K"
+
+msgid "Unique device identifier."
+msgstr "Eindeutige Gerätekennung."
+
+msgid "Unlimited"
+msgstr "Unbegrenzt"
+
+msgid "Usage"
+msgstr "Nutzung"
+
+msgid "Use global default"
+msgstr "Globalen Standard verwenden"
+
+msgid "Calibration"
+msgstr "Kalibrierung"
+
+msgid "Measures idle background traffic to determine the optimal usage detection threshold."
+msgstr "Misst den Hintergrund-Traffic im Leerlauf, um den optimalen Schwellwert für die Nutzungserkennung zu bestimmen."
+
+msgid "Ensure the device is connected but not actively used during calibration."
+msgstr "Stellen Sie sicher, dass das Gerät verbunden, aber nicht aktiv genutzt wird während der Kalibrierung."
+
+msgid "Idle"
+msgstr "Inaktiv"
+
+msgid "Progress"
+msgstr "Fortschritt"
+
+msgid "Elapsed: %d / %d seconds (%d samples)"
+msgstr "Vergangen: %d / %d Sekunden (%d Samples)"
+
+msgid "Completed"
+msgstr "Abgeschlossen"
+
+msgid "P90"
+msgstr "P90"
+
+msgid "Recommended Threshold"
+msgstr "Empfohlener Schwellwert"
+
+msgid "Error"
+msgstr "Fehler"
+
+msgid "Unknown error"
+msgstr "Unbekannter Fehler"
+
+msgid "Measurement Duration"
+msgstr "Messdauer"
+
+msgid "5 minutes"
+msgstr "5 Minuten"
+
+msgid "15 minutes"
+msgstr "15 Minuten"
+
+msgid "30 minutes (recommended)"
+msgstr "30 Minuten (empfohlen)"
+
+msgid "60 minutes"
+msgstr "60 Minuten"
+
+msgid "Actions"
+msgstr "Aktionen"
+
+msgid "Cancel Calibration"
+msgstr "Kalibrierung abbrechen"
+
+msgid "Start Calibration"
+msgstr "Kalibrierung starten"
+
+msgid "Calibration cancelled"
+msgstr "Kalibrierung abgebrochen"
+
+msgid "Failed"
+msgstr "Fehlgeschlagen"
+
+msgid "Calibration started"
+msgstr "Kalibrierung gestartet"
+
+msgid "Apply"
+msgstr "Anwenden"
+
+msgid "Apply Recommended Threshold"
+msgstr "Empfohlenen Schwellwert anwenden"
+
+msgid "Apply Calibration"
+msgstr "Kalibrierung anwenden"
+
+msgid "This will update the traffic threshold for this device. Continue?"
+msgstr "Dies wird den Traffic-Schwellwert für dieses Gerät aktualisieren. Fortfahren?"
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Threshold applied: %s"
+msgstr "Schwellwert angewendet: %s"

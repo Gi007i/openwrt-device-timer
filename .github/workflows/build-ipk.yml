@@ -1,0 +1,224 @@
+name: Build IPK and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  SDK_VERSION: "24.10.0"
+  SDK_TARGET: "bcm27xx-bcm2711"
+  SDK_URL: "https://downloads.openwrt.org/releases/24.10.0/targets/bcm27xx/bcm2711/openwrt-sdk-24.10.0-bcm27xx-bcm2711_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+  PACKAGE_NAME: "luci-app-device-timer"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building version: $VERSION"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gettext git libncurses-dev libssl-dev python3-setuptools rsync \
+            swig unzip zlib1g-dev file wget libelf-dev zstd
+
+      - name: Cache OpenWRT SDK
+        uses: actions/cache@v4
+        id: sdk-cache
+        with:
+          path: ~/openwrt-sdk
+          key: openwrt-sdk-${{ env.SDK_VERSION }}-${{ env.SDK_TARGET }}-v3
+
+      - name: Download and extract SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          wget -q "$SDK_URL" -O /tmp/sdk.tar.zst
+          mkdir -p ~/openwrt-sdk
+          tar --zstd -xf /tmp/sdk.tar.zst --strip-components=1 -C ~/openwrt-sdk
+          rm /tmp/sdk.tar.zst
+
+      - name: Setup SDK feeds
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          cd ~/openwrt-sdk
+
+          # Use GitHub mirrors (git.openwrt.org is unreliable for large repos in CI)
+          sed 's/^src-git-full /src-git /' feeds.conf.default \
+            | sed 's|https://git.openwrt.org/feed/|https://github.com/openwrt/|' \
+            | sed 's|https://git.openwrt.org/project/luci.git|https://github.com/openwrt/luci.git|' \
+            > feeds.conf
+
+          ./scripts/feeds update -a
+
+          # Verify critical feeds were cloned
+          [ -d feeds/luci ] || { echo "ERROR: luci feed missing"; exit 1; }
+          [ -d feeds/packages ] || { echo "ERROR: packages feed missing"; exit 1; }
+
+          ./scripts/feeds install -a
+          make defconfig
+          make package/lua/compile V=s
+
+      - name: Copy package and compile
+        run: |
+          rm -rf ~/openwrt-sdk/package/$PACKAGE_NAME
+          rm -rf ~/openwrt-sdk/tmp
+          cp -r src/$PACKAGE_NAME ~/openwrt-sdk/package/
+          cd ~/openwrt-sdk
+          make package/$PACKAGE_NAME/compile V=s
+
+      - name: Collect IPK artifacts
+        run: |
+          mkdir -p artifacts
+          find ~/openwrt-sdk/bin/packages/ -name "*device-timer*.ipk" -exec cp {} artifacts/ \;
+          echo "Built packages:"
+          ls -lh artifacts/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipk-packages
+          path: artifacts/*.ipk
+          retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract changelog for version
+        id: changelog
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          NOTES=$(awk "/^## \\[${VERSION}\\]/{found=1; next} /^## \\[/{if(found) exit} found" CHANGELOG.md)
+          REPO_URL="${{ github.server_url }}/${{ github.repository }}"
+          NOTES="${NOTES}
+
+          **Full Changelog:** [CHANGELOG.md](${REPO_URL}/blob/main/CHANGELOG.md)"
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.notes }}
+
+  update-feed:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ipk-packages
+          path: artifacts
+
+      - name: Cache OpenWRT SDK (for index generator)
+        uses: actions/cache@v4
+        id: sdk-cache
+        with:
+          path: ~/openwrt-sdk
+          key: openwrt-sdk-${{ env.SDK_VERSION }}-${{ env.SDK_TARGET }}-v3
+
+      - name: Update packages and generate index
+        run: |
+          mkdir -p packages
+          rm -f packages/*device-timer*.ipk
+          cp artifacts/*.ipk packages/
+          echo "Updated packages:"
+          ls -lh packages/
+
+          cd packages
+
+          # ipkg-make-index.sh requires mkhash via $MKHASH env var
+          export PATH="$HOME/openwrt-sdk/staging_dir/host/bin:$PATH"
+          if ! command -v mkhash >/dev/null 2>&1; then
+            mkdir -p /tmp/bin
+            printf '#!/bin/bash\ncase "$1" in\n  sha256) sha256sum | cut -d" " -f1 ;;\n  md5) md5sum | cut -d" " -f1 ;;\nesac\n' > /tmp/bin/mkhash
+            chmod +x /tmp/bin/mkhash
+            export PATH="/tmp/bin:$PATH"
+          fi
+          export MKHASH=mkhash
+
+          if [ -x ~/openwrt-sdk/scripts/ipkg-make-index.sh ]; then
+            ~/openwrt-sdk/scripts/ipkg-make-index.sh . > Packages
+          else
+            echo "ERROR: ipkg-make-index.sh not found in SDK cache"
+            exit 1
+          fi
+
+          gzip -k -f Packages
+          echo "--- Generated Packages index ---"
+          cat Packages
+
+      - name: Sign package index
+        env:
+          USIGN_KEY: ${{ secrets.USIGN_KEY }}
+        run: |
+          cd packages
+
+          if [ -z "$USIGN_KEY" ]; then
+            echo "WARNING: USIGN_KEY secret not set, skipping signing"
+            exit 0
+          fi
+
+          # Write signing key to temp file
+          printf '%s\n' "$USIGN_KEY" > /tmp/feed-key.sec
+          chmod 600 /tmp/feed-key.sec
+
+          # Try usign from SDK, fall back to signify-openbsd
+          USIGN="$HOME/openwrt-sdk/staging_dir/host/bin/usign"
+          if [ -x "$USIGN" ]; then
+            echo "Signing with usign from SDK"
+            $USIGN -S -m Packages -s /tmp/feed-key.sec
+          elif command -v signify-openbsd >/dev/null 2>&1; then
+            echo "Signing with signify-openbsd (fallback)"
+            signify-openbsd -S -m Packages -s /tmp/feed-key.sec
+          else
+            echo "Installing signify-openbsd as fallback..."
+            sudo apt-get install -y signify-openbsd
+            signify-openbsd -S -m Packages -s /tmp/feed-key.sec
+          fi
+
+          rm -f /tmp/feed-key.sec
+
+          echo "--- Packages.sig ---"
+          cat Packages.sig
+
+      - name: Commit and push to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packages/
+          git commit -m "update feed: ${{ github.ref_name }}" || echo "No changes to commit"
+          git push

@@ -1,0 +1,9 @@
+# Force LF for all text files (required for OpenWRT/Linux target)
+* text=auto eol=lf
+
+# Explicitly mark binary files
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.lmo binary

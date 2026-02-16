@@ -1,0 +1,251 @@
+# Device Timer LuCI Application
+# Copyright (C) 2026
+# This file is distributed under the same license as the luci-app-device-timer package.
+#
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Active"
+msgstr ""
+
+msgid "Add Device"
+msgstr ""
+
+msgid "Advanced"
+msgstr ""
+
+msgid "Blocked"
+msgstr ""
+
+msgid "Daemon Status"
+msgstr ""
+
+msgid "Days:"
+msgstr ""
+
+msgid "Default Traffic Threshold"
+msgstr ""
+
+msgid "Device ID"
+msgstr ""
+
+msgid "Device Timer"
+msgstr ""
+
+msgid "Device Timer Configuration"
+msgstr ""
+
+msgid "Disabled"
+msgstr ""
+
+msgid "Edit Device"
+msgstr ""
+
+msgid "Enable Monitoring"
+msgstr ""
+
+msgid "Enable or disable the entire monitoring system."
+msgstr ""
+
+msgid "Enabled"
+msgstr ""
+
+msgid "Example:"
+msgstr ""
+
+msgid "Format:"
+msgstr ""
+
+msgid "General"
+msgstr ""
+
+msgid "Global Settings"
+msgstr ""
+
+msgid "Global settings for device usage monitoring."
+msgstr ""
+
+msgid "How often the daemon checks device activity (in seconds)."
+msgstr ""
+
+msgid "Internet access schedule per day."
+msgstr ""
+
+msgid "Invalid format: %s"
+msgstr ""
+
+msgid "Invalid format. Use: Day,HH:MM-HH:MM,Limit in min (e.g., Mon,14:00-18:00,60 or Mon,06:00-22:00,0 for unlimited)"
+msgstr ""
+
+msgid "IP"
+msgstr ""
+
+msgid "Last Reset"
+msgstr ""
+
+msgid "MAC"
+msgstr ""
+
+msgid "MAC Address"
+msgstr ""
+
+msgid "Minimum traffic to count as active usage, e.g., 6M or 500K."
+msgstr ""
+
+msgid "Monitor and manage device usage times."
+msgstr ""
+
+msgid "Monitored Devices"
+msgstr ""
+
+msgid "Monitoring"
+msgstr ""
+
+msgid "Name"
+msgstr ""
+
+msgid "No Schedule"
+msgstr ""
+
+msgid "Non-overlapping time windows per day."
+msgstr ""
+
+msgid "Outside Window"
+msgstr ""
+
+msgid "Overlapping schedules on %s: %s and %s"
+msgstr ""
+
+msgid "Override global threshold, e.g., 6M or 500K."
+msgstr ""
+
+msgid "Poll Interval"
+msgstr ""
+
+msgid "Remaining"
+msgstr ""
+
+msgid "Required for reliable device blocking."
+msgstr ""
+
+msgid "Running"
+msgstr ""
+
+msgid "Schedule"
+msgstr ""
+
+msgid "seconds"
+msgstr ""
+
+msgid "Service Status"
+msgstr ""
+
+msgid "Status"
+msgstr ""
+
+msgid "Stopped"
+msgstr ""
+
+msgid "Traffic Threshold"
+msgstr ""
+
+msgid "Invalid format, use e.g., 6M or 500K"
+msgstr ""
+
+msgid "Unique device identifier."
+msgstr ""
+
+msgid "Unlimited"
+msgstr ""
+
+msgid "Usage"
+msgstr ""
+
+msgid "Use global default"
+msgstr ""
+
+msgid "Calibration"
+msgstr ""
+
+msgid "Measures idle background traffic to determine the optimal usage detection threshold."
+msgstr ""
+
+msgid "Ensure the device is connected but not actively used during calibration."
+msgstr ""
+
+msgid "Idle"
+msgstr ""
+
+msgid "Progress"
+msgstr ""
+
+msgid "Elapsed: %d / %d seconds (%d samples)"
+msgstr ""
+
+msgid "Completed"
+msgstr ""
+
+msgid "P90"
+msgstr ""
+
+msgid "Recommended Threshold"
+msgstr ""
+
+msgid "Error"
+msgstr ""
+
+msgid "Unknown error"
+msgstr ""
+
+msgid "Measurement Duration"
+msgstr ""
+
+msgid "5 minutes"
+msgstr ""
+
+msgid "15 minutes"
+msgstr ""
+
+msgid "30 minutes (recommended)"
+msgstr ""
+
+msgid "60 minutes"
+msgstr ""
+
+msgid "Actions"
+msgstr ""
+
+msgid "Cancel Calibration"
+msgstr ""
+
+msgid "Start Calibration"
+msgstr ""
+
+msgid "Calibration cancelled"
+msgstr ""
+
+msgid "Failed"
+msgstr ""
+
+msgid "Calibration started"
+msgstr ""
+
+msgid "Apply"
+msgstr ""
+
+msgid "Apply Recommended Threshold"
+msgstr ""
+
+msgid "Apply Calibration"
+msgstr ""
+
+msgid "This will update the traffic threshold for this device. Continue?"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Threshold applied: %s"
+msgstr ""
