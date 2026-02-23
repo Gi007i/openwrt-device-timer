@@ -146,7 +146,7 @@ monitor_device() {
             local daily_usage=$(get_cached_state "$device_id" 2 0)
             queue_state_update "$device_id" "$daily_usage" 0 "$current_time" "" "$cached_flatrate"
             # Reset counters to prevent accumulation
-            nft reset counters table $NFT_TABLE 2>/dev/null
+            nft reset rules table $NFT_TABLE 2>/dev/null
             return
             ;;
         outside_window)
@@ -158,7 +158,7 @@ monitor_device() {
             local daily_usage=$(get_cached_state "$device_id" 2 0)
             queue_state_update "$device_id" "$daily_usage" 0 "$current_time" "" "$cached_flatrate"
             # Reset counters to prevent accumulation
-            nft reset counters table $NFT_TABLE 2>/dev/null
+            nft reset rules table $NFT_TABLE 2>/dev/null
             return
             ;;
         active)
@@ -319,7 +319,7 @@ monitor_device() {
         manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "unblock"
     fi
 
-    nft reset counters table $NFT_TABLE 2>/dev/null
+    nft reset rules table $NFT_TABLE 2>/dev/null
 }
 
 monitor_device_cb() {

@@ -27,11 +27,11 @@ LuCI app for monitoring and limiting the usage time of network devices. Automati
 1. In LuCI go to **System → Software**
 2. Under **Download and install package**, paste this URL and click **OK**:
    ```
-   https://gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer_1.0.1-r1_all.ipk
+   https://gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer_1.0.2-r1_all.ipk
    ```
 3. Repeat for the German translation:
    ```
-   https://gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de_1.0.1-1_all.ipk
+   https://gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de_1.0.2-1_all.ipk
    ```
 
 This installs the package, the feed signing key and registers the package feed automatically. Future updates are available through **System → Software → Updates**.

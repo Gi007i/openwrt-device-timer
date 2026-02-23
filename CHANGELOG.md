@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.2] - 2026-02-23
+
+### Fixed
+- Fix nftables counter reset using `nft reset rules` instead of `nft reset counters` (anonymous counters were never reset, causing cumulative traffic values and incorrect usage detection)
+
 ## [1.0.1] - 2026-02-15
 
 ### Fixed
