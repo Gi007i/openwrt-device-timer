@@ -1,7 +1,14 @@
 # GitLab CI/CD pipeline for building OpenWRT IPK packages
 # Equivalent to .github/workflows/build-ipk.yml
 
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - if: $CI_COMMIT_BRANCH =~ /^release\//
+    - if: $CI_PIPELINE_SOURCE == "web"
+
 stages:
+  - prepare
   - build
   - release
   - pages
@@ -59,6 +66,8 @@ build:
         make package/lua/compile V=s
         cd ..
       fi
+    # Replace __PAGES_URL__ placeholder with actual Pages URL
+    - sed -i "s|__PAGES_URL__|${CI_PAGES_URL}|g" src/$PACKAGE_NAME/Makefile
     - |
       rm -rf openwrt-sdk/package/$PACKAGE_NAME
       rm -rf openwrt-sdk/tmp
@@ -111,10 +120,10 @@ pages:
   script:
     - mkdir -p public/packages public/keys
     - |
-      cat > public/index.html << 'HTMLEOF'
+      cat > public/index.html << HTMLEOF
       <!DOCTYPE html>
       <html>
-      <head><meta http-equiv="refresh" content="0;url=https://gitlab.com/Gi007i/openwrt-device-timer"></head>
+      <head><meta http-equiv="refresh" content="0;url=${CI_PROJECT_URL}"></head>
       <body></body>
       </html>
       HTMLEOF
@@ -163,3 +172,42 @@ pages:
   artifacts:
     paths:
       - public
+
+prepare-release:
+  stage: prepare
+  image:
+    name: alpine/git:latest
+    entrypoint: [""]
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^release\//
+  variables:
+    GIT_STRATEGY: clone
+    GIT_DEPTH: 0
+  script:
+    - |
+      # Extract version from branch name (release/v1.0.5 → 1.0.5)
+      VERSION="${CI_COMMIT_BRANCH#release/v}"
+      TAG="v${VERSION}"
+      echo "Preparing release ${TAG}"
+      echo "${VERSION}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "ERROR: Invalid version ${VERSION}"; exit 1; }
+      # Configure git
+      git config user.name "gitlab-ci[bot]"
+      git config user.email "gitlab-ci[bot]@users.noreply.gitlab.com"
+      git remote set-url origin "https://oauth2:${RELEASE_TOKEN}@gitlab.com/${CI_PROJECT_PATH}.git"
+      # Squash-merge onto main
+      git fetch origin main
+      git checkout main
+      git merge --squash "origin/${CI_COMMIT_BRANCH}"
+      # Replace placeholders in README
+      sed -i "s|__PAGES_URL__|${CI_PAGES_URL}|g" README.md
+      sed -i "s|__VERSION__|${VERSION}|g" README.md
+      # Set PKG_VERSION in Makefile
+      sed -i "s|^PKG_VERSION:=.*|PKG_VERSION:=${VERSION}|" src/luci-app-device-timer/Makefile
+      # Commit, tag, push
+      git add -A
+      git commit -m "feat: release v${VERSION} device timer package"
+      git tag "${TAG}"
+      git push origin main
+      git push origin "${TAG}"
+      # Delete release branch
+      git push origin --delete "${CI_COMMIT_BRANCH}" || true

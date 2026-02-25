@@ -14,6 +14,7 @@ env:
   SDK_TARGET: "bcm27xx-bcm2711"
   SDK_URL: "https://downloads.openwrt.org/releases/24.10.0/targets/bcm27xx/bcm2711/openwrt-sdk-24.10.0-bcm27xx-bcm2711_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
   PACKAGE_NAME: "luci-app-device-timer"
+  PAGES_URL: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
 jobs:
   build:
@@ -76,6 +77,9 @@ jobs:
           ./scripts/feeds install -a
           make defconfig
           make package/lua/compile V=s
+
+      - name: Replace __PAGES_URL__ placeholder
+        run: sed -i "s|__PAGES_URL__|${PAGES_URL}|g" src/$PACKAGE_NAME/Makefile
 
       - name: Copy package and compile
         run: |
@@ -150,6 +154,17 @@ jobs:
           path: ~/openwrt-sdk
           key: openwrt-sdk-${{ env.SDK_VERSION }}-${{ env.SDK_TARGET }}-v3
 
+      - name: Generate index.html redirect
+        run: |
+          REPO_URL="${{ github.server_url }}/${{ github.repository }}"
+          cat > index.html << EOF
+          <!DOCTYPE html>
+          <html>
+          <head><meta http-equiv="refresh" content="0;url=${REPO_URL}"></head>
+          <body></body>
+          </html>
+          EOF
+
       - name: Update packages and generate index
         run: |
           mkdir -p packages
@@ -219,6 +234,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/
+          git add packages/ index.html
           git commit -m "update feed: ${{ github.ref_name }}" || echo "No changes to commit"
           git push

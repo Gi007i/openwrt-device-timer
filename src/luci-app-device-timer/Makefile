@@ -1,6 +1,6 @@
 include $(TOPDIR)/rules.mk
 
-PKG_VERSION:=1.0.3
+PKG_VERSION:=1.1.0
 PKG_RELEASE:=1
 PKG_PO_VERSION:=$(PKG_VERSION)-$(PKG_RELEASE)
 
@@ -32,11 +32,10 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	/etc/init.d/rpcd reload 2>/dev/null
 
 	# Register package feed for updates and metadata
-	FEED_LINE="src/gz device_timer https://gi007i.github.io/openwrt-device-timer/packages"
-	if ! grep -q "device_timer" /etc/opkg/customfeeds.conf 2>/dev/null; then
-		echo "$$FEED_LINE" >> /etc/opkg/customfeeds.conf
-		opkg update 2>/dev/null
-	fi
+	FEED_LINE="src/gz device_timer __PAGES_URL__/packages"
+	sed -i '/device_timer/d' /etc/opkg/customfeeds.conf 2>/dev/null
+	echo "$$FEED_LINE" >> /etc/opkg/customfeeds.conf
+	opkg update 2>/dev/null
 
 	# Note: enable/start and luci-indexcache handled by default_postinst
 fi

@@ -27,11 +27,11 @@ LuCI app for monitoring and limiting the usage time of network devices. Automati
 1. In LuCI go to **System → Software**
 2. Under **Download and install package**, paste this URL and click **OK**:
    ```
-   https://gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer_1.0.3-r1_all.ipk
+   https://openwrt-device-timer-736a1b.gitlab.io/packages/luci-app-device-timer_1.1.0-r1_all.ipk
    ```
 3. Repeat for the German translation:
    ```
-   https://gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de_1.0.3-1_all.ipk
+   https://openwrt-device-timer-736a1b.gitlab.io/packages/luci-i18n-device-timer-de_1.1.0-1_all.ipk
    ```
 
 This installs the package, the feed signing key and registers the package feed automatically. Future updates are available through **System → Software → Updates**.
@@ -39,8 +39,8 @@ This installs the package, the feed signing key and registers the package feed a
 ### Via SSH
 
 ```sh
-wget -O /etc/opkg/keys/608ca90e3cad75e0 https://gi007i.github.io/openwrt-device-timer/keys/608ca90e3cad75e0
-echo 'src/gz device_timer https://gi007i.github.io/openwrt-device-timer/packages' >> /etc/opkg/customfeeds.conf
+wget -O /etc/opkg/keys/608ca90e3cad75e0 https://openwrt-device-timer-736a1b.gitlab.io/keys/608ca90e3cad75e0
+echo 'src/gz device_timer https://openwrt-device-timer-736a1b.gitlab.io/packages' >> /etc/opkg/customfeeds.conf
 opkg update
 opkg install luci-app-device-timer luci-i18n-device-timer-de
 ```

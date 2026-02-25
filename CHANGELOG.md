@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.0] - 2026-02-25
+
+### Added
+- Automated release pipeline for GitLab and GitHub
+- Direct IPK download URLs in installation instructions
+
+### Changed
+- Replace hardcoded platform URLs with `__PAGES_URL__` placeholder for CI/CD substitution
+- Package feed URL and signing key URL are now set automatically during build
+- Pages redirect uses CI/CD variables instead of hardcoded repository URL
+
 ## [1.0.3] - 2026-02-24
 
 ### Fixed
