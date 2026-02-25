@@ -1,9 +1,23 @@
 #!/bin/sh
 # firewall.sh - Firewall rules, cleanup, and conntrack flush for device_timer daemon
-# Requires globals: FIREWALL_NEEDS_RELOAD, CONNTRACK_FLUSH_IPS, TEMP_DIR, STATE_FILE, log()
+# Requires globals: FIREWALL_NEEDS_RELOAD, FIREWALL_NEEDS_COMMIT, CONNTRACK_FLUSH_IPS, TEMP_DIR, STATE_FILE, log()
 
 # Conntrack flush queue (space-separated IPs)
 CONNTRACK_FLUSH_IPS=""
+
+# Commit batched firewall UCI changes
+commit_firewall_changes() {
+    if [ "$FIREWALL_NEEDS_COMMIT" -eq 1 ]; then
+        if ! uci commit firewall; then
+            log "Error: Failed to commit batched firewall changes"
+            uci revert firewall
+            FIREWALL_NEEDS_COMMIT=0
+            FIREWALL_NEEDS_RELOAD=0
+            return 1
+        fi
+        FIREWALL_NEEDS_COMMIT=0
+    fi
+}
 
 # Flush conntrack entries for blocked devices to kill established connections
 # Must be called AFTER firewall reload (new connections blocked first, then existing killed)
@@ -63,11 +77,7 @@ manage_firewall_rule() {
         uci set firewall.$section_id.target='REJECT'
         uci set firewall.$section_id.enabled='0'
 
-        if ! uci commit firewall; then
-            log "[$device_id] Error: Failed to commit firewall changes"
-            return
-        fi
-
+        FIREWALL_NEEDS_COMMIT=1
         FIREWALL_NEEDS_RELOAD=1
         rule_section="$section_id"
     else
@@ -76,11 +86,8 @@ manage_firewall_rule() {
         if [ "$current_mac" != "$firewall_mac" ]; then
             log "[$device_id] Updating firewall rule MAC: $current_mac -> $firewall_mac"
             uci set "firewall.$rule_section.src_mac=$firewall_mac"
-            if ! uci commit firewall; then
-                log "[$device_id] Error: Failed to commit firewall MAC update"
-            else
-                FIREWALL_NEEDS_RELOAD=1
-            fi
+            FIREWALL_NEEDS_COMMIT=1
+            FIREWALL_NEEDS_RELOAD=1
         fi
     fi
 
@@ -90,10 +97,7 @@ manage_firewall_rule() {
         if [ "$current_enabled" = "0" ]; then
             log "[$device_id] Activating firewall rule"
             uci delete firewall.$rule_section.enabled
-            if ! uci commit firewall; then
-                log "[$device_id] Error: Failed to commit firewall changes"
-                return
-            fi
+            FIREWALL_NEEDS_COMMIT=1
             FIREWALL_NEEDS_RELOAD=1
             # Queue conntrack flush for this device
             local stored_ip=""
@@ -107,10 +111,7 @@ manage_firewall_rule() {
         if [ "$current_enabled" != "0" ]; then
             log "[$device_id] Deactivating firewall rule"
             uci set firewall.$rule_section.enabled='0'
-            if ! uci commit firewall; then
-                log "[$device_id] Error: Failed to commit firewall changes"
-                return
-            fi
+            FIREWALL_NEEDS_COMMIT=1
             FIREWALL_NEEDS_RELOAD=1
         fi
     fi
@@ -133,6 +134,7 @@ disable_all_monitoring() {
     log "Global monitoring disabled, releasing all devices"
     config_load device_timer
     config_foreach unblock_device_cb device
+    commit_firewall_changes
     if [ "$FIREWALL_NEEDS_RELOAD" -eq 1 ]; then
         if ! /etc/init.d/firewall reload; then
             log "Error: Firewall reload failed during disable, skipping nft cleanup"
@@ -180,6 +182,8 @@ cleanup_orphaned_resources() {
             log "Warning: Failed to commit firewall cleanup changes"
         else
             FIREWALL_NEEDS_RELOAD=1
+            # Reset batch flag since this commit also flushes any staged changes
+            FIREWALL_NEEDS_COMMIT=0
         fi
     fi
 

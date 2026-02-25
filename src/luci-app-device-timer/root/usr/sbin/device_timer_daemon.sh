@@ -8,6 +8,7 @@ LAST_DATE_FILE="$TEMP_DIR/last_date"
 STATE_FILE="$TEMP_DIR/state.json"
 POLL_INTERVAL=60
 FIREWALL_NEEDS_RELOAD=0
+FIREWALL_NEEDS_COMMIT=0
 CLEANUP_COUNTER=0
 CLEANUP_INTERVAL=10
 LAST_GLOBAL_ENABLED=""
@@ -182,9 +183,18 @@ monitor_device() {
     # Resolve device IP from MAC (for nftables traffic counting)
     local device_ip=$(resolve_device_ip "$device_mac")
 
+    # Validate IP format before using in nft commands (defense-in-depth)
+    if [ -n "$device_ip" ] && ! echo "$device_ip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        log "[$device_id] Warning: Invalid IP format from ARP/DHCP, ignoring"
+        device_ip=""
+    fi
+
     # Stored IP as fallback (when ARP/DHCP empty but table exists)
     local stored_nft_ip=""
     [ -f "$TEMP_DIR/${device_id}_nft_ip" ] && stored_nft_ip=$(cat "$TEMP_DIR/${device_id}_nft_ip")
+    if [ -n "$stored_nft_ip" ] && ! echo "$stored_nft_ip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        stored_nft_ip=""
+    fi
 
     # Effective IP: current preferred, fallback to stored
     local nft_ip="${device_ip:-$stored_nft_ip}"
@@ -379,6 +389,9 @@ main() {
         config_foreach monitor_device_cb device
 
         write_all_states
+
+        # Batch commit all firewall UCI changes, then reload
+        commit_firewall_changes
 
         # Single firewall reload after all devices processed
         if [ "$FIREWALL_NEEDS_RELOAD" -eq 1 ]; then

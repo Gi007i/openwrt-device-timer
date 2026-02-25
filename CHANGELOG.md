@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.3] - 2026-02-24
+
+### Fixed
+- Config reload no longer causes state loss (signal-based instead of restart)
+- RPC commands no longer lost under concurrent access
+- Daemon recovers from corrupt state.json
+- nft counter reset in midnight reset function
+- IP format validation before nft commands
+- Command injection in config validator log output
+- prerm firewall rule cleanup matching too broadly
+- Default state version mismatch
+
+### Changed
+- Batch firewall UCI commits per cycle instead of per device
+- Remove redundant config reload in schedule evaluation
+
+### Documentation
+- Fix api-reference terminology and add missing field descriptions
+
 ## [1.0.2] - 2026-02-23
 
 ### Fixed

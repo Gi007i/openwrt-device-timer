@@ -47,7 +47,7 @@ All API calls follow the ubus JSON-RPC format:
 | [`status`](#status) | READ | Get daemon process status |
 | [`validate`](#validate) | READ | Validate a list of schedules |
 | [`getcalibration`](#getcalibration) | READ | Get calibration progress and results |
-| [`reset`](#reset) | WRITE | Reset daily usage counter for a device |
+| [`reset`](#reset) | WRITE | Reset usage counter for a device |
 | [`setflatrate`](#setflatrate) | WRITE | Enable or disable flatrate mode |
 | [`startcalibration`](#startcalibration) | WRITE | Start traffic threshold calibration |
 | [`applycalibration`](#applycalibration) | WRITE | Apply calibration result as threshold |
@@ -100,6 +100,10 @@ curl -s -X POST http://ROUTER_IP/ubus \
   ]
 }
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `traffic_threshold` | string\|null | Per-device traffic threshold (e.g. `"6M"`), or `null` if using global default |
 
 ---
 
@@ -358,12 +362,12 @@ curl -s -X POST http://ROUTER_IP/ubus \
 | `status` | string | `idle`, `running`, `completed`, or `error` |
 | `elapsed` | int | Seconds elapsed since calibration start |
 | `duration` | int | Total calibration duration in seconds |
-| `sample_interval` | int | Seconds between traffic samples |
+| `sample_interval` | int | Seconds between traffic samples (only present when calibration is active or completed) |
 | `sample_count` | int | Number of traffic samples collected |
 | `progress_percent` | int | Completion percentage (0–100) |
-| `result_p90` | int | 90th percentile traffic value in bytes |
-| `result_recommended` | int | Recommended threshold in bytes |
-| `error_message` | string | Error description if status is `error` |
+| `result_p90` | int | 90th percentile traffic value in bytes (only present when calibration is active or completed) |
+| `result_recommended` | int | Recommended threshold in bytes (only present when calibration is active or completed) |
+| `error_message` | string | Error description (only present when calibration is active or completed, set by daemon) |
 
 **Errors:**
 - `Missing device id`
@@ -373,7 +377,7 @@ curl -s -X POST http://ROUTER_IP/ubus \
 
 ### reset
 
-Reset the daily usage counter for a device. The counter is set to zero and firewall rules are updated on the next daemon poll cycle.
+Reset the usage counter for a device. The counter is set to zero and the daemon is signaled to process the change immediately. The device is unblocked within seconds.
 
 **Parameters:**
 
@@ -413,7 +417,7 @@ curl -s -X POST http://ROUTER_IP/ubus \
 
 ### setflatrate
 
-Enable or disable flatrate mode for a device. When enabled, the device has unlimited access regardless of time limits.
+Enable or disable flatrate mode for a device. When enabled, the device has unlimited access regardless of time limits. The daemon is signaled to process the change immediately.
 
 **Parameters:**
 
@@ -501,7 +505,8 @@ curl -s -X POST http://ROUTER_IP/ubus \
 - `Invalid device id`
 - `Device not found`
 - `Device must be enabled for calibration`
-- Duration/interval validation errors (must be within allowed ranges)
+- `Duration must be between 5 and 60 minutes (300-3600s)`
+- `Sample interval must be between 5 and 30 seconds`
 
 ---
 
@@ -595,7 +600,7 @@ The `status` field in device responses indicates the current state:
 | Status | Description |
 |--------|-------------|
 | `active` | Device is within its time window and has remaining usage time |
-| `blocked` | Daily usage limit has been reached, device is blocked by firewall |
+| `blocked` | Usage limit for the current time window has been reached, device is blocked by firewall |
 | `unlimited` | Flatrate mode is enabled or the schedule limit is set to `0` |
 | `outside_window` | Device has schedules for today but none is currently active |
 | `no_schedule` | No schedule is configured for today |
@@ -609,6 +614,6 @@ Schedules follow the format `Day,HH:MM-HH:MM,Limit`:
 |------|--------|---------|-------------|
 | Day | `Mon`–`Sun` | `Mon` | Day of the week |
 | Time window | `HH:MM-HH:MM` | `14:00-18:00` | Start and end time (24h format) |
-| Limit | integer | `60` | Daily limit in minutes, `0` for unlimited |
+| Limit | integer | `60` | Usage limit in minutes per time window, `0` for unlimited |
 
 Overnight windows like `22:00-06:00` are supported. Multiple schedules per day are allowed as long as their time windows do not overlap.

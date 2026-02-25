@@ -7,6 +7,11 @@ import { cursor } from 'uci';
 
 const validation = call(loadfile('/usr/share/ucode/device_timer/validate.uc'));
 
+function shellquote(s) {
+    if (s == null) s = '';
+    return "'" + replace(s, "'", "'\\''") + "'";
+}
+
 // Main validation
 const uci = cursor();
 let hasErrors = false;
@@ -28,7 +33,8 @@ uci.foreach('device_timer', 'device', (s) => {
         if (!result.valid) {
             print('device_timer: Config error for ' + deviceId + ': ' + result.error + '\n');
             // system() is global built-in, NOT imported from fs
-            system('logger -t device_timer "Config validation failed for ' + deviceId + ': ' + result.error + '"');
+            // shellquote prevents command injection via schedule entry values
+            system('logger -t device_timer ' + shellquote('Config validation failed for ' + deviceId + ': ' + result.error));
             hasErrors = true;
         }
     }

@@ -1,6 +1,6 @@
 include $(TOPDIR)/rules.mk
 
-PKG_VERSION:=1.0.2
+PKG_VERSION:=1.0.3
 PKG_RELEASE:=1
 PKG_PO_VERSION:=$(PKG_VERSION)-$(PKG_RELEASE)
 
@@ -50,7 +50,7 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 
 	# Remove Block_Device_* firewall rules
 	changed=0
-	for section in $$(uci -X -q show firewall | grep '=rule' | cut -d. -f2 | cut -d= -f1); do
+	for section in $$(uci -X -q show firewall | grep '=rule$$' | cut -d. -f2 | cut -d= -f1); do
 		name=$$(uci -q get "firewall.$$section.name")
 		case "$$name" in
 			Block_Device_*)

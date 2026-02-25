@@ -159,12 +159,12 @@ function resolveIpFromMac(mac) {
 function readState() {
     const stateFile = TEMP_DIR + '/state.json';
     const file = open(stateFile, 'r');
-    if (!file) return { version: 1, devices: {} };
+    if (!file) return { version: 2, devices: {} };
     const content = file.read('all');
     file.close();
-    if (!content) return { version: 1, devices: {} };
+    if (!content) return { version: 2, devices: {} };
     const parsed = json(content);
-    return parsed || { version: 1, devices: {} };
+    return parsed || { version: 2, devices: {} };
 }
 
 // Read usage from state.json (state stores seconds, return minutes)

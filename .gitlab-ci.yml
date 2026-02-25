@@ -1,0 +1,165 @@
+# GitLab CI/CD pipeline for building OpenWRT IPK packages
+# Equivalent to .github/workflows/build-ipk.yml
+
+stages:
+  - build
+  - release
+  - pages
+
+variables:
+  SDK_VERSION: "24.10.0"
+  SDK_TARGET: "bcm27xx-bcm2711"
+  SDK_URL: "https://downloads.openwrt.org/releases/24.10.0/targets/bcm27xx/bcm2711/openwrt-sdk-24.10.0-bcm27xx-bcm2711_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+  PACKAGE_NAME: "luci-app-device-timer"
+
+build:
+  stage: build
+  image: ubuntu:latest
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - if: $CI_PIPELINE_SOURCE == "web"
+  cache:
+    key: openwrt-sdk-${SDK_VERSION}-${SDK_TARGET}-v3
+    paths:
+      - openwrt-sdk/
+  before_script:
+    - apt-get update
+    - >-
+      apt-get install -y build-essential clang flex bison g++ gawk
+      gettext git libncurses-dev libssl-dev python3-setuptools rsync
+      swig unzip zlib1g-dev file wget libelf-dev zstd
+  script:
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        VERSION="${CI_COMMIT_TAG#v}"
+      else
+        VERSION="dev-$(git rev-parse --short HEAD)"
+      fi
+      echo "Building version: $VERSION"
+    - |
+      if [ ! -d "openwrt-sdk/staging_dir" ]; then
+        echo "SDK not cached, downloading..."
+        wget -q "$SDK_URL" -O /tmp/sdk.tar.zst
+        mkdir -p openwrt-sdk
+        tar --zstd -xf /tmp/sdk.tar.zst --strip-components=1 -C openwrt-sdk
+        rm /tmp/sdk.tar.zst
+      fi
+    - |
+      if [ ! -d "openwrt-sdk/feeds/luci" ]; then
+        cd openwrt-sdk
+        sed 's/^src-git-full /src-git /' feeds.conf.default \
+          | sed 's|https://git.openwrt.org/feed/|https://github.com/openwrt/|' \
+          | sed 's|https://git.openwrt.org/project/luci.git|https://github.com/openwrt/luci.git|' \
+          > feeds.conf
+        ./scripts/feeds update -a
+        [ -d feeds/luci ] || { echo "ERROR: luci feed missing"; exit 1; }
+        [ -d feeds/packages ] || { echo "ERROR: packages feed missing"; exit 1; }
+        ./scripts/feeds install -a
+        make defconfig
+        make package/lua/compile V=s
+        cd ..
+      fi
+    - |
+      rm -rf openwrt-sdk/package/$PACKAGE_NAME
+      rm -rf openwrt-sdk/tmp
+      cp -r src/$PACKAGE_NAME openwrt-sdk/package/
+      cd openwrt-sdk
+      make package/$PACKAGE_NAME/compile V=s
+      cd ..
+    - |
+      mkdir -p artifacts
+      find openwrt-sdk/bin/packages/ -name "*device-timer*.ipk" -exec cp {} artifacts/ \;
+      echo "Built packages:"
+      ls -lh artifacts/
+  artifacts:
+    paths:
+      - artifacts/
+    expire_in: 30 days
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+  needs:
+    - job: build
+      artifacts: false
+  script:
+    - |
+      VERSION="${CI_COMMIT_TAG#v}"
+      NOTES=$(awk "/^## \\[${VERSION}\\]/{found=1; next} /^## \\[/{if(found) exit} found" CHANGELOG.md)
+      NOTES="${NOTES}
+
+      **Full Changelog:** [CHANGELOG.md](${CI_PROJECT_URL}/-/blob/main/CHANGELOG.md)"
+      echo "$NOTES" > release_notes.md
+      cat release_notes.md
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "Release $CI_COMMIT_TAG"
+    description: ./release_notes.md
+
+pages:
+  stage: pages
+  image: ubuntu:latest
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+  needs:
+    - job: build
+      artifacts: true
+  before_script:
+    - apt-get update && apt-get install -y signify-openbsd zstd
+  script:
+    - mkdir -p public/packages public/keys
+    - |
+      cat > public/index.html << 'HTMLEOF'
+      <!DOCTYPE html>
+      <html>
+      <head><meta http-equiv="refresh" content="0;url=https://gitlab.com/Gi007i/openwrt-device-timer"></head>
+      <body></body>
+      </html>
+      HTMLEOF
+    - cp artifacts/*.ipk public/packages/
+    # Copy public signing key
+    - |
+      KEY_DIR="src/${PACKAGE_NAME}/root/etc/opkg/keys"
+      if [ -d "$KEY_DIR" ]; then
+        cp "$KEY_DIR"/* public/keys/
+      fi
+    # Generate Packages index from IPK control metadata
+    # OpenWRT IPK files are tar.gz archives (not ar/deb format)
+    - |
+      cd public/packages
+      for ipk in *.ipk; do
+        [ -f "$ipk" ] || continue
+        mkdir -p _tmp && cd _tmp
+        tar xzf "../$ipk" 2>/dev/null || true
+        if [ -f control.tar.gz ]; then
+          tar xzf control.tar.gz 2>/dev/null || true
+        elif [ -f control.tar.zst ]; then
+          tar --zstd -xf control.tar.zst 2>/dev/null || true
+        fi
+        if [ -f ./control ]; then
+          cat ./control
+          echo "Filename: $ipk"
+          echo "Size: $(stat -c %s "../$ipk")"
+          echo "SHA256sum: $(sha256sum "../$ipk" | cut -d' ' -f1)"
+          echo ""
+        fi
+        cd .. && rm -rf _tmp
+      done > Packages
+      gzip -k -f Packages
+      cd ../..
+    # Sign package index
+    - |
+      if [ -n "$USIGN_KEY" ]; then
+        cd public/packages
+        printf '%s\n' "$USIGN_KEY" > /tmp/feed-key.sec
+        chmod 600 /tmp/feed-key.sec
+        signify-openbsd -S -m Packages -s /tmp/feed-key.sec
+        rm -f /tmp/feed-key.sec
+      else
+        echo "WARNING: USIGN_KEY not set, skipping signing"
+      fi
+  artifacts:
+    paths:
+      - public

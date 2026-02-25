@@ -33,7 +33,7 @@ get_active_schedule() {
         fi
     }
 
-    config_load device_timer
+    # config already loaded by caller (config_foreach in main loop or check_midnight_reset)
     config_list_foreach "$device_id" schedule check_schedule_entry
 
     if [ "$found_today" -eq 0 ]; then
@@ -96,7 +96,7 @@ reset_device() {
     reset_device_state "$device_id"
 
     # Reset nftables counters to prevent old traffic from being counted
-    nft reset counters table $NFT_TABLE 2>/dev/null
+    nft reset rules table $NFT_TABLE 2>/dev/null
 
     # Also unblock device on reset (new day)
     device_mac=$(uci get device_timer.$device_id.mac 2>/dev/null | tr 'A-F' 'a-f')

@@ -15,8 +15,10 @@ read_all_states() {
         import { open } from 'fs';
         let f = open('$STATE_FILE', 'r');
         if (!f) exit(0);
-        let state = json(f.read('all'));
+        let content = f.read('all');
         f.close();
+        if (!content || substr(trim(content), 0, 1) !== '{') exit(0);
+        let state = json(content);
         if (!state || !state.devices) exit(0);
         for (let id in state.devices) {
             let d = state.devices[id];
@@ -156,7 +158,7 @@ write_all_states() {
         if (f) {
             let content = f.read('all');
             f.close();
-            if (content) {
+            if (content && substr(trim(content), 0, 1) === '{') {
                 let parsed = json(content);
                 if (parsed) state = parsed;
             }
@@ -265,7 +267,14 @@ write_all_states() {
 # rpcd writes commands to state.json.rpc, daemon processes them here
 process_rpc_updates() {
     local rpc_file="${STATE_FILE}.rpc"
+    local processing_file="${rpc_file}.processing"
     [ -f "$rpc_file" ] || return 0
+
+    # Atomically rename to prevent TOCTOU race with rpcd appending new commands
+    # Uses same lock as rpcd's queueRpcUpdate to serialize access
+    if ! flock "$TEMP_DIR/state.lock" -c "mv '$rpc_file' '$processing_file'" 2>/dev/null; then
+        return 0
+    fi
 
     local result
     result=$(ucode -e "
@@ -276,7 +285,7 @@ process_rpc_updates() {
         if (f) {
             let content = f.read('all');
             f.close();
-            if (content) {
+            if (content && substr(trim(content), 0, 1) === '{') {
                 let parsed = json(content);
                 if (parsed) state = parsed;
             }
@@ -284,7 +293,7 @@ process_rpc_updates() {
         state.version = 2;
         state.devices = state.devices || {};
 
-        let rpc = open('${rpc_file}', 'r');
+        let rpc = open('${processing_file}', 'r');
         if (!rpc) {
             print('ERROR: Cannot open rpc file');
             exit(1);
@@ -401,23 +410,26 @@ process_rpc_updates() {
     case "$result" in
         ERROR:*)
             log "RPC update error: $result"
+            rm -f "$processing_file"
             return 1
             ;;
         OK:0)
-            rm -f "$rpc_file"
+            rm -f "$processing_file"
             ;;
         OK:*)
             local count="${result#OK:}"
             if flock "$TEMP_DIR/state.lock" -c "mv '${STATE_FILE}.rpc.tmp' '$STATE_FILE'" 2>/dev/null; then
-                rm -f "$rpc_file"
+                rm -f "$processing_file"
                 log "Processed $count RPC updates"
             else
                 log "RPC update error: failed to write state file"
                 rm -f "${STATE_FILE}.rpc.tmp"
+                rm -f "$processing_file"
             fi
             ;;
         *)
             log "RPC update error: unexpected output: $result"
+            rm -f "$processing_file"
             ;;
     esac
 }
@@ -435,8 +447,10 @@ read_flatrate_from_file() {
         import { open } from 'fs';
         let f = open('$STATE_FILE', 'r');
         if (!f) exit(0);
-        let state = json(f.read('all'));
+        let content = f.read('all');
         f.close();
+        if (!content || substr(trim(content), 0, 1) !== '{') { print('0'); exit(0); }
+        let state = json(content);
         if (!state || !state.devices || !state.devices['$device_id']) {
             print('0');
             exit(0);
