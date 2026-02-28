@@ -21,7 +21,13 @@ var callDeviceTimerStatus = rpc.declare({
 var callStartCalibration = rpc.declare({
 	object: 'luci.device-timer',
 	method: 'startcalibration',
-	params: ['id', 'duration', 'sample_interval']
+	params: ['id', 'duration']
+});
+
+var callStartCalibrationPhase2 = rpc.declare({
+	object: 'luci.device-timer',
+	method: 'startcalibrationphase2',
+	params: ['id']
 });
 
 var callGetCalibration = rpc.declare({
@@ -44,6 +50,8 @@ var callCancelCalibration = rpc.declare({
 
 // Module-level store for device data (accessible from option methods)
 var deviceDataStore = {};
+var activeCalibrationSectionId = null;
+var calibrationActionTime = {};
 
 // Format bytes to human-readable string
 function formatBytes(bytes) {
@@ -156,6 +164,425 @@ window.deviceTimerValidation = {
 	validateScheduleOverlaps: validateScheduleOverlaps
 };
 
+// Build a calibration status badge element
+function renderCalibrationBadge(cal) {
+	if (cal.status === 'phase1_running')
+		return E('span', { 'class': 'label notice' }, _('Phase 1: Idle Measurement'));
+	if (cal.status === 'phase1_done')
+		return E('span', { 'class': 'label success' }, _('Phase 1 Complete'));
+	if (cal.status === 'phase2_running')
+		return E('span', { 'class': 'label notice' }, _('Phase 2: Usage Measurement'));
+	if (cal.status === 'completed')
+		return E('span', { 'class': 'label success' }, _('Completed'));
+	if (cal.status === 'error')
+		return E('span', {}, [
+			E('span', { 'class': 'label danger' }, _('Error')),
+			E('span', { 'style': 'margin-left:0.5em' }, cal.error_message || _('Unknown error'))
+		]);
+	return E('span', { 'class': 'label' }, _('Idle'));
+}
+
+// Update calibration UI in open modal during polling
+function updateCalibrationInModal() {
+	if (!document.querySelector('.cbi-modal')) {
+		activeCalibrationSectionId = null;
+		return;
+	}
+	var sid = activeCalibrationSectionId;
+	if (!sid || !deviceDataStore[sid]) return;
+
+	var container = document.getElementById('calibration-ui-container');
+	if (!container) return;
+
+	var calData = deviceDataStore[sid].calibration;
+	var cal = (calData && calData.status) ? calData : { status: 'idle' };
+
+	// Update status badge
+	var statusField = document.getElementById('cal-status-field');
+	if (statusField) dom.content(statusField, renderCalibrationBadge(cal));
+
+	// Row visibility
+	var showPhase1 = (cal.status === 'phase1_running');
+	var showPhase2 = (cal.status === 'phase2_running');
+	var showPhase1Results = (cal.status === 'phase1_done');
+	var showResults = (cal.status === 'completed');
+	var showDuration = (cal.status === 'idle' || cal.status === 'completed' || cal.status === 'error');
+	var showIdleHint = (cal.status === 'idle' || cal.status === 'error');
+	var showApply = (cal.status === 'completed');
+
+	var rows = {
+		'cal-row-phase1': showPhase1,
+		'cal-row-phase2': showPhase2,
+		'cal-row-phase1-results': showPhase1Results,
+		'cal-row-idle-stats': showResults,
+		'cal-row-usage-stats': showResults,
+		'cal-row-recommended': showResults,
+		'cal-row-duration': showDuration,
+		'cal-row-idle-hint': showIdleHint,
+		'cal-row-apply': showApply
+	};
+	var ids = Object.keys(rows);
+	for (var i = 0; i < ids.length; i++) {
+		var el = document.getElementById(ids[i]);
+		if (el) el.style.display = rows[ids[i]] ? '' : 'none';
+	}
+
+	// Update phase 1 progress
+	if (showPhase1) {
+		var p1 = document.getElementById('cal-phase1-content');
+		if (p1) {
+			dom.content(p1, E('div', {}, [
+				E('div', {}, [
+					E('em', {}, _('Do not use the device during this phase.')),
+					' ',
+					_('%d%% (%d samples)').format(cal.phase1_progress || 0, cal.phase1_samples || 0)
+				]),
+				E('div', { 'class': 'cbi-progressbar' }, [
+					E('div', { 'style': 'width:' + (cal.phase1_progress || 0) + '%' })
+				])
+			]));
+		}
+	}
+
+	// Update phase 2 progress
+	if (showPhase2) {
+		var p2 = document.getElementById('cal-phase2-content');
+		if (p2) {
+			dom.content(p2, E('div', {}, [
+				E('div', {}, [
+					E('em', {}, _('Now use the device normally.')),
+					' ',
+					_('%d%% (%d samples)').format(cal.phase2_progress || 0, cal.phase2_samples || 0)
+				]),
+				E('div', { 'class': 'cbi-progressbar' }, [
+					E('div', { 'style': 'width:' + (cal.phase2_progress || 0) + '%' })
+				])
+			]));
+		}
+	}
+
+	// Update phase 1 results
+	if (showPhase1Results) {
+		var p1r = document.getElementById('cal-phase1-results-content');
+		if (p1r) {
+			dom.content(p1r, E('div', {}, [
+				E('div', {}, _('Idle measurement complete.') + ' ' +
+					_('%d samples collected.').format(cal.phase1_samples || 0)),
+				E('div', { 'style': 'margin-top:0.5em' },
+					E('em', {}, _('Start using the device, then click the button below to begin usage measurement.')))
+			]));
+		}
+	}
+
+	// Update completed results
+	if (showResults) {
+		var idleField = document.getElementById('cal-idle-stats-content');
+		if (idleField) {
+			dom.content(idleField, E('span', {},
+				formatBytes(cal.result_idle_p95 || 0) +
+				' (' + _('Median') + ': ' + formatBytes(cal.result_idle_median || 0) + ')'));
+		}
+
+		var usageField = document.getElementById('cal-usage-stats-content');
+		if (usageField) {
+			var outlierText = (cal.result_stream_outliers > 0)
+				? ' (' + cal.result_stream_outliers + ' ' + _('outliers removed') + ')'
+				: '';
+			dom.content(usageField, E('span', {},
+				formatBytes(cal.result_stream_p5 || 0) +
+				' (' + _('Median') + ': ' + formatBytes(cal.result_stream_median || 0) + ')' +
+				outlierText));
+		}
+
+		var recField = document.getElementById('cal-recommended-content');
+		if (recField) {
+			var recChildren = [
+				E('strong', {}, formatBytes(cal.result_recommended || 0)),
+				E('br', {}),
+				E('em', { 'style': 'font-size:90%' }, _('The result is a guideline — manual adjustment is recommended.'))
+			];
+			if (cal.result_overlap) {
+				recChildren.push(E('br', {}));
+				recChildren.push(E('em', { 'style': 'font-size:90%; color:#c00' },
+					_('Idle traffic overlaps with usage traffic — result may be unreliable.')));
+			}
+			dom.content(recField, E('span', {}, recChildren));
+		}
+	}
+
+	// Update action button text
+	var actionBtn = document.getElementById('cal-action-btn');
+	if (actionBtn) {
+		var newTitle;
+		if (cal.status === 'phase1_running' || cal.status === 'phase2_running')
+			newTitle = _('Cancel Calibration');
+		else if (cal.status === 'phase1_done')
+			newTitle = _('Start Usage Measurement');
+		else
+			newTitle = _('Start Idle Measurement');
+		actionBtn.textContent = newTitle;
+	}
+}
+
+// Calibration Tab widget — extends DummyValue for stable renderWidget
+// Pattern from dhcp.js CBILeaseStatus: renderWidget in prototype, not instance
+var CBICalibrationUI = form.DummyValue.extend({
+	__name__: 'CBI.CalibrationUI',
+
+	renderWidget: function(section_id) {
+		activeCalibrationSectionId = section_id;
+		var device = deviceDataStore[section_id] || {};
+		var calData = device.calibration;
+		var cal = (calData && calData.status) ? calData : { status: 'idle' };
+		var status = cal.status || 'idle';
+
+		var showPhase1 = (status === 'phase1_running');
+		var showPhase2 = (status === 'phase2_running');
+		var showPhase1Results = (status === 'phase1_done');
+		var showResults = (status === 'completed');
+		var showDuration = (status === 'idle' || status === 'completed' || status === 'error');
+		var showIdleHint = (status === 'idle' || status === 'error');
+		var showApply = (status === 'completed');
+
+		function calRow(id, label, content, visible) {
+			return E('div', {
+				'class': 'cbi-value', 'id': id,
+				'style': visible ? '' : 'display:none'
+			}, [
+				E('label', { 'class': 'cbi-value-title' }, label),
+				E('div', { 'class': 'cbi-value-field' }, content)
+			]);
+		}
+
+		// Action button title
+		var actionTitle;
+		if (status === 'phase1_running' || status === 'phase2_running')
+			actionTitle = _('Cancel Calibration');
+		else if (status === 'phase1_done')
+			actionTitle = _('Start Usage Measurement');
+		else
+			actionTitle = _('Start Idle Measurement');
+
+		// Action button handler
+		var actionBtn = E('button', {
+			'class': 'btn cbi-button-action', 'id': 'cal-action-btn',
+			'click': function() {
+				var dev = deviceDataStore[section_id] || {};
+				var c = dev.calibration || { status: 'idle' };
+
+				if (c.status === 'phase1_running' || c.status === 'phase2_running') {
+					calibrationActionTime[section_id] = Date.now();
+					callCancelCalibration(section_id).then(function(result) {
+						if (result.success) {
+							if (deviceDataStore[section_id])
+								deviceDataStore[section_id].calibration = { status: 'idle' };
+							updateCalibrationInModal();
+						} else {
+							ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
+						}
+					}).catch(function() {
+						ui.addNotification(null, E('p', _('Failed')), 'error');
+					});
+				} else if (c.status === 'phase1_done') {
+					calibrationActionTime[section_id] = Date.now();
+					callStartCalibrationPhase2(section_id).then(function(result) {
+						if (result.success) {
+							var prev = (deviceDataStore[section_id] && deviceDataStore[section_id].calibration) || {};
+							if (deviceDataStore[section_id])
+								deviceDataStore[section_id].calibration = {
+									status: 'phase2_running',
+									phase1_elapsed: prev.idle_duration || 0,
+									phase2_elapsed: 0,
+									idle_duration: prev.idle_duration || 0,
+									usage_duration: prev.usage_duration || 0,
+									phase1_samples: prev.phase1_samples || 0,
+									phase2_samples: 0,
+									phase1_progress: 100,
+									phase2_progress: 0
+								};
+							updateCalibrationInModal();
+						} else {
+							ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
+						}
+					}).catch(function() {
+						ui.addNotification(null, E('p', _('Failed')), 'error');
+					});
+				} else {
+					var durEl = document.getElementById('calibration-duration-select');
+					var duration = durEl ? parseInt(durEl.value, 10) : 1800;
+
+					calibrationActionTime[section_id] = Date.now();
+					callStartCalibration(section_id, duration).then(function(result) {
+						if (result.success) {
+							if (deviceDataStore[section_id])
+								deviceDataStore[section_id].calibration = {
+									status: 'phase1_running',
+									phase1_elapsed: 0,
+									phase2_elapsed: 0,
+									idle_duration: Math.floor(duration / 2),
+									usage_duration: duration - Math.floor(duration / 2),
+									phase1_samples: 0,
+									phase2_samples: 0,
+									phase1_progress: 0,
+									phase2_progress: 0
+								};
+							updateCalibrationInModal();
+						} else {
+							ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
+						}
+					}).catch(function() {
+						ui.addNotification(null, E('p', _('Failed')), 'error');
+					});
+				}
+			}
+		}, actionTitle);
+
+		// Apply button handler
+		var applyBtn = E('button', {
+			'class': 'btn cbi-button-action', 'id': 'cal-apply-btn',
+			'click': function() {
+				var dev = deviceDataStore[section_id] || {};
+				var calState = (dev.calibration && dev.calibration.status) ? dev.calibration : {};
+				var modalContent = [
+					E('p', {}, _('This will update the traffic threshold for this device. Continue?'))
+				];
+				if (calState.result_overlap) {
+					modalContent.push(E('p', { 'style': 'color:#c00' },
+						_('Idle traffic overlaps with usage traffic — result may be unreliable.')));
+				}
+				modalContent.push(E('div', { 'class': 'right' }, [
+					E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
+					E('button', { 'class': 'btn cbi-button-action', 'click': function() {
+						calibrationActionTime[section_id] = Date.now();
+						callApplyCalibration(section_id).then(function(result) {
+							ui.hideModal();
+							if (result.success) {
+								ui.addNotification(null, E('p', _('Threshold applied: %s').format(result.threshold)), 'success');
+								if (deviceDataStore[section_id])
+									deviceDataStore[section_id].calibration = { status: 'idle' };
+								updateCalibrationInModal();
+							} else {
+								ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
+							}
+						}).catch(function() {
+							ui.hideModal();
+							ui.addNotification(null, E('p', _('Failed')), 'error');
+						});
+					}}, _('Apply'))
+				]));
+				ui.showModal(_('Apply Calibration'), modalContent);
+			}
+		}, _('Apply Recommended Threshold'));
+		var savedDuration = uci.get('device_timer', section_id, 'calibration_duration') || '1800';
+		var durationSelect = E('select', { 'class': 'cbi-input-select', 'id': 'calibration-duration-select' }, [
+			E('option', { 'value': '300' }, _('5 minutes (quick test)')),
+			E('option', { 'value': '900' }, _('15 minutes')),
+			E('option', { 'value': '1800' }, _('30 minutes (recommended)')),
+			E('option', { 'value': '3600' }, _('60 minutes (best accuracy)'))
+		]);
+		durationSelect.value = savedDuration;
+		durationSelect.addEventListener('change', function() {
+			uci.set('device_timer', section_id, 'calibration_duration', this.value);
+			uci.save('device_timer');
+		});
+
+		return E('div', { 'id': 'calibration-ui-container' }, [
+			E('style', {}, [
+				'.cbi-value[data-name="_calibration_ui"] { padding:0; margin:0; border:none }',
+				'.cbi-value[data-name="_calibration_ui"] > .cbi-value-title { display:none }',
+				'.cbi-value[data-name="_calibration_ui"] > .cbi-value-field { margin-left:0; padding:0 }',
+				'#calibration-ui-container > .cbi-value { display: flex; align-items: baseline !important }'
+			].join('\n')),
+
+			calRow('cal-row-status', _('Status'),
+				E('div', { 'id': 'cal-status-field' }, renderCalibrationBadge(cal)), true),
+
+			calRow('cal-row-phase1', _('Phase 1: Idle'),
+				E('div', { 'id': 'cal-phase1-content' }, showPhase1 ? [
+					E('div', {}, [
+						E('em', {}, _('Do not use the device during this phase.')),
+						' ',
+						_('%d%% (%d samples)').format(cal.phase1_progress || 0, cal.phase1_samples || 0)
+					]),
+					E('div', { 'class': 'cbi-progressbar' }, [
+						E('div', { 'style': 'width:' + (cal.phase1_progress || 0) + '%' })
+					])
+				] : []), showPhase1),
+
+			calRow('cal-row-phase2', _('Phase 2: Usage'),
+				E('div', { 'id': 'cal-phase2-content' }, showPhase2 ? [
+					E('div', {}, [
+						E('em', {}, _('Now use the device normally.')),
+						' ',
+						_('%d%% (%d samples)').format(cal.phase2_progress || 0, cal.phase2_samples || 0)
+					]),
+					E('div', { 'class': 'cbi-progressbar' }, [
+						E('div', { 'style': 'width:' + (cal.phase2_progress || 0) + '%' })
+					])
+				] : []), showPhase2),
+
+			calRow('cal-row-phase1-results', _('Idle Results'),
+				E('div', { 'id': 'cal-phase1-results-content' }, showPhase1Results ? [
+					E('div', {}, _('Idle measurement complete.') + ' ' +
+						_('%d samples collected.').format(cal.phase1_samples || 0)),
+					E('div', { 'style': 'margin-top:0.5em' },
+						E('em', {}, _('Start using the device, then click the button below to begin usage measurement.')))
+				] : []), showPhase1Results),
+
+			calRow('cal-row-idle-stats', _('Idle Traffic'),
+				E('div', { 'id': 'cal-idle-stats-content' }, showResults ? [
+					E('span', {}, formatBytes(cal.result_idle_p95 || 0) +
+						' (' + _('Median') + ': ' + formatBytes(cal.result_idle_median || 0) + ')')
+				] : []), showResults),
+
+			calRow('cal-row-usage-stats', _('Usage Traffic'),
+				E('div', { 'id': 'cal-usage-stats-content' }, showResults ? (function() {
+					var outlierText = (cal.result_stream_outliers > 0)
+						? ' (' + cal.result_stream_outliers + ' ' + _('outliers removed') + ')'
+						: '';
+					return [E('span', {}, formatBytes(cal.result_stream_p5 || 0) +
+						' (' + _('Median') + ': ' + formatBytes(cal.result_stream_median || 0) + ')' +
+						outlierText)];
+				})() : []), showResults),
+
+			calRow('cal-row-recommended', _('Recommended Threshold'),
+				E('div', { 'id': 'cal-recommended-content' }, showResults ? (function() {
+					var children = [
+						E('strong', {}, formatBytes(cal.result_recommended || 0)),
+						E('br', {}),
+						E('em', { 'style': 'font-size:90%' }, _('The result is a guideline — manual adjustment is recommended.'))
+					];
+					if (cal.result_overlap) {
+						children.push(E('br', {}));
+						children.push(E('em', { 'style': 'font-size:90%; color:#c00' },
+							_('Idle traffic overlaps with usage traffic — result may be unreliable.')));
+					}
+					return children;
+				})() : []), showResults),
+
+			calRow('cal-row-duration', _('Measurement Duration'), E('div', {}, [
+				durationSelect,
+				E('div', { 'class': 'cbi-value-description' },
+					_('Measures idle and active traffic in two phases to calculate the optimal usage detection threshold.') + ' ' +
+					_('A threshold of 1K is recommended during calibration to avoid the device being blocked.'))
+			]), showDuration),
+
+			calRow('cal-row-idle-hint', ' ', E('div', {}, [
+				E('em', {}, _('Ensure the device is not being used, then click the button below to begin idle measurement.'))
+			]), showIdleHint),
+
+			calRow('cal-row-actions', _('Actions'),
+				E('div', {}, [ actionBtn ]), true),
+
+			calRow('cal-row-apply', _('Apply'),
+				E('div', {}, [ applyBtn ]), showApply)
+		]);
+	},
+
+	remove: function() {},
+	write: function() {}
+});
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -236,6 +663,7 @@ return view.extend({
 	updateDeviceTable: function(devices) {
 		var statusLabels = {
 			'active': _('Active'),
+			'paused': _('Paused'),
 			'blocked': _('Blocked'),
 			'unlimited': _('Unlimited'),
 			'outside_window': _('Outside Window'),
@@ -397,6 +825,7 @@ return view.extend({
 			var status = device.status || 'unknown';
 			var labels = {
 				'active': _('Active'),
+				'paused': _('Paused'),
 				'blocked': _('Blocked'),
 				'unlimited': _('Unlimited'),
 				'outside_window': _('Outside Window'),
@@ -440,6 +869,12 @@ return view.extend({
 			if (!pattern.test(value))
 				return _('Invalid format. Use: Day,HH:MM-HH:MM,Limit in min (e.g., Mon,14:00-18:00,60 or Mon,06:00-22:00,0 for unlimited)');
 
+			// Check for zero-duration windows (start == end)
+			var valParts = value.split(',');
+			var valTimeParts = valParts[1].split('-');
+			if (valTimeParts[0] === valTimeParts[1])
+				return _('Invalid format: %s').format(value);
+
 			// Get all current schedule values and check for overlaps
 			var allValues = this.formvalue(section_id);
 			if (allValues && allValues.length > 1) {
@@ -463,138 +898,9 @@ return view.extend({
 			return true;
 		};
 
-		// Calibration Tab - Status as individual form fields
-		// Fix badge alignment: force baseline alignment on DummyValue rows
-		// so badge text sits on same baseline as label text.
-		if (!document.getElementById('calibration-badge-fix')) {
-			document.head.appendChild(E('style', { 'id': 'calibration-badge-fix' },
-				'[data-tab="calibration"] .cbi-value[data-widget="CBI.DummyValue"] { align-items: baseline !important }'));
-		}
-
-		o = s.taboption('calibration', form.DummyValue, '_calibration_status', _('Status'));
+		// Calibration Tab — extends DummyValue for stable renderWidget
+		o = s.taboption('calibration', CBICalibrationUI, '_calibration_ui', ' ');
 		o.modalonly = true;
-		o.renderWidget = function(section_id) {
-			var device = deviceDataStore[section_id] || {};
-			var cal = device.calibration || { status: 'idle' };
-
-			if (cal.status === 'running')
-				return E('span', { 'class': 'label notice' }, _('Running'));
-			if (cal.status === 'completed')
-				return E('span', { 'class': 'label success' }, _('Completed'));
-			if (cal.status === 'error')
-				return E('span', {}, [
-					E('span', { 'class': 'label danger' }, _('Error')),
-					E('span', { 'style': 'margin-left:0.5em' }, cal.error_message || _('Unknown error'))
-				]);
-			return E('span', { 'class': 'label' }, _('Idle'));
-		};
-		o.formvalue = function(section_id) {
-			var device = deviceDataStore[section_id] || {};
-			var cal = device.calibration || { status: 'idle' };
-			return cal.status || 'idle';
-		};
-
-		o = s.taboption('calibration', form.DummyValue, '_calibration_progress', _('Progress'));
-		o.modalonly = true;
-		o.depends('_calibration_status', 'running');
-		o.renderWidget = function(section_id) {
-			var device = deviceDataStore[section_id] || {};
-			var cal = device.calibration || {};
-			return E('div', {}, [
-				E('div', {}, _('Elapsed: %d / %d seconds (%d samples)')
-					.format(cal.elapsed || 0, cal.duration || 0, cal.sample_count || 0)),
-				E('div', { 'class': 'cbi-progressbar' }, [
-					E('div', { 'style': 'width:' + (cal.progress_percent || 0) + '%' })
-				])
-			]);
-		};
-
-		o = s.taboption('calibration', form.DummyValue, '_calibration_p90', _('P90'));
-		o.modalonly = true;
-		o.depends('_calibration_status', 'completed');
-		o.renderWidget = function(section_id) {
-			var device = deviceDataStore[section_id] || {};
-			var cal = device.calibration || {};
-			return E('span', {}, formatBytes(cal.result_p90 || 0));
-		};
-
-		o = s.taboption('calibration', form.DummyValue, '_calibration_recommended', _('Recommended Threshold'));
-		o.modalonly = true;
-		o.depends('_calibration_status', 'completed');
-		o.renderWidget = function(section_id) {
-			var device = deviceDataStore[section_id] || {};
-			var cal = device.calibration || {};
-			return E('span', {}, formatBytes(cal.result_recommended || 0));
-		};
-
-		o = s.taboption('calibration', form.ListValue, '_calibration_duration', _('Measurement Duration'),
-			_('Measures idle background traffic to determine the optimal usage detection threshold.') + ' ' +
-			_('Ensure the device is connected but not actively used during calibration.'));
-		o.modalonly = true;
-		o.value('300', _('5 minutes'));
-		o.value('900', _('15 minutes'));
-		o.value('1800', _('30 minutes (recommended)'));
-		o.value('3600', _('60 minutes'));
-		o.default = '1800';
-
-		o = s.taboption('calibration', form.Button, '_calibration_action', _('Actions'));
-		o.modalonly = true;
-		o.inputtitle = function(section_id) {
-			var device = deviceDataStore[section_id] || {};
-			var cal = device.calibration || { status: 'idle' };
-			return (cal.status === 'running') ? _('Cancel Calibration') : _('Start Calibration');
-		};
-		o.onclick = function(ev, section_id) {
-			var device = deviceDataStore[section_id] || {};
-			var cal = device.calibration || { status: 'idle' };
-
-			if (cal.status === 'running') {
-				return callCancelCalibration(section_id).then(function(result) {
-					if (result.success) {
-						ui.addNotification(null, E('p', _('Calibration cancelled')), 'info');
-						window.location.reload();
-					} else {
-						ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
-					}
-				});
-			} else {
-				var durationEl = document.querySelector('[data-name="_calibration_duration"] select');
-				var duration = durationEl ? parseInt(durationEl.value, 10) : 1800;
-
-				return callStartCalibration(section_id, duration, 10).then(function(result) {
-					if (result.success) {
-						ui.addNotification(null, E('p', _('Calibration started')), 'success');
-						window.location.reload();
-					} else {
-						ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
-					}
-				});
-			}
-		};
-
-		o = s.taboption('calibration', form.Button, '_calibration_apply', _('Apply'));
-		o.modalonly = true;
-		o.inputtitle = _('Apply Recommended Threshold');
-		o.depends('_calibration_status', 'completed');
-		o.onclick = function(ev, section_id) {
-			return ui.showModal(_('Apply Calibration'), [
-				E('p', {}, _('This will update the traffic threshold for this device. Continue?')),
-				E('div', { 'class': 'right' }, [
-					E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
-					E('button', { 'class': 'btn cbi-button-action', 'click': function() {
-						return callApplyCalibration(section_id).then(function(result) {
-							ui.hideModal();
-							if (result.success) {
-								ui.addNotification(null, E('p', _('Threshold applied: %s').format(result.threshold)), 'success');
-								window.location.reload();
-							} else {
-								ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
-							}
-						});
-					}}, _('Apply'))
-				])
-			]);
-		};
 
 		// Polling for live updates
 		poll.add(L.bind(function() {
@@ -618,7 +924,13 @@ return view.extend({
 				var calibrations = results[2] || [];
 
 				calibrations.forEach(function(item) {
-					if (deviceDataStore[item.id] && item.cal) {
+					if (deviceDataStore[item.id] && item.cal && item.cal.status) {
+						// Skip poll update if user recently performed a calibration action
+						var actionTs = calibrationActionTime[item.id];
+						if (actionTs && (Date.now() - actionTs) < 10000) {
+							return;
+						}
+						delete calibrationActionTime[item.id];
 						deviceDataStore[item.id].calibration = item.cal;
 					}
 				});
@@ -632,10 +944,11 @@ return view.extend({
 
 				this.updateStatusHeader(newStatus);
 				this.updateDeviceTable(newDevices);
+				updateCalibrationInModal();
 			}, this)).catch(function() {
 				// Polling error - stale UI until next poll succeeds
 			});
-		}, this), 30);
+		}, this), Math.max((daemonStatus && daemonStatus.poll_interval) || 60, 10));
 
 		return m.render();
 	}

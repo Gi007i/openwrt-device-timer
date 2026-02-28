@@ -17,7 +17,7 @@
 				"/tmp/device_timer/*": [ "write" ]
 			},
 			"ubus": {
-				"luci.device-timer": [ "reset", "setflatrate", "startcalibration", "applycalibration", "cancelcalibration" ]
+				"luci.device-timer": [ "reset", "setflatrate", "setpause", "startcalibration", "startcalibrationphase2", "applycalibration", "cancelcalibration" ]
 			},
 			"uci": [ "device_timer", "firewall" ]
 		}

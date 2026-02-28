@@ -3,7 +3,7 @@
 # Requires globals: STATE_FILE, TEMP_DIR, log()
 
 # Batch state I/O: read all device states in one ucode call
-# Output format: device_id\tusage\tprevious_usage\tlast_run_time\tactive_window\tflatrate\tcal_status\tcal_start\tcal_duration\tcal_last_sample\tcal_last_counter
+# Output format: device_id\tusage\tprevious_usage\tlast_run_time\tactive_window\tflatrate\tpaused\tcal_status\tcal_start\tcal_idle_dur\tcal_last_sample\tcal_p2_start\tcal_usage_dur
 # Stored in ALL_STATES global variable
 read_all_states() {
     ALL_STATES=""
@@ -27,16 +27,18 @@ read_all_states() {
             let last_run = (d.last_run_time != null) ? d.last_run_time : 0;
             let window = d.active_window ? d.active_window : '';
             let flatrate = (d.flatrate != null) ? d.flatrate : 0;
+            let paused = (d.paused != null) ? d.paused : 0;
 
             let cal = d.calibration || {};
             let cal_status = cal.status || 'idle';
             let cal_start = (cal.start_time != null) ? cal.start_time : 0;
-            let cal_duration = (cal.duration != null) ? cal.duration : 1800;
+            let cal_idle_dur = (cal.idle_duration != null) ? cal.idle_duration : 0;
             let cal_last_sample = (cal.last_sample_time != null) ? cal.last_sample_time : 0;
-            let cal_last_counter = (cal.last_counter != null) ? cal.last_counter : 0;
+            let cal_p2_start = (cal.phase2_start_time != null) ? cal.phase2_start_time : 0;
+            let cal_usage_dur = (cal.usage_duration != null) ? cal.usage_duration : 0;
 
-            print(id + '\t' + usage + '\t' + prev + '\t' + last_run + '\t' + window + '\t' + flatrate + '\t' +
-                  cal_status + '\t' + cal_start + '\t' + cal_duration + '\t' + cal_last_sample + '\t' + cal_last_counter + '\n');
+            print(id + '\t' + usage + '\t' + prev + '\t' + last_run + '\t' + window + '\t' + flatrate + '\t' + paused + '\t' +
+                  cal_status + '\t' + cal_start + '\t' + cal_idle_dur + '\t' + cal_last_sample + '\t' + cal_p2_start + '\t' + cal_usage_dur + '\n');
         }
     " 2>/dev/null)
 }
@@ -83,14 +85,29 @@ get_cached_flatrate() {
     fi
 }
 
-# Read cached calibration status for a device (string: idle/running/completed/error)
+# Read cached paused for a device (0 or 1)
+get_cached_paused() {
+    local device_id="$1"
+    if [ -z "$ALL_STATES" ]; then
+        echo "0"
+        return
+    fi
+    local value=$(echo "$ALL_STATES" | awk -F'\t' -v id="$device_id" '$1==id {print $7; exit}')
+    if [ "$value" = "1" ]; then
+        echo "1"
+    else
+        echo "0"
+    fi
+}
+
+# Read cached calibration status for a device
 get_cached_calibration_status() {
     local device_id="$1"
     if [ -z "$ALL_STATES" ]; then
         echo "idle"
         return
     fi
-    local value=$(echo "$ALL_STATES" | awk -F'\t' -v id="$device_id" '$1==id {print $7; exit}')
+    local value=$(echo "$ALL_STATES" | awk -F'\t' -v id="$device_id" '$1==id {print $8; exit}')
     if [ -z "$value" ]; then
         echo "idle"
     else
@@ -98,15 +115,15 @@ get_cached_calibration_status() {
     fi
 }
 
-# Read cached calibration data: start_time|duration|sample_interval|last_sample_time|last_counter
+# Read cached calibration data: start_time|idle_duration|last_sample_time|phase2_start_time|usage_duration
 get_cached_calibration_data() {
     local device_id="$1"
     if [ -z "$ALL_STATES" ]; then
-        echo "0|1800|10|0|0"
+        echo "0|0|0|0|0"
         return
     fi
     echo "$ALL_STATES" | awk -F'\t' -v id="$device_id" \
-        '$1==id {print $8"|"$9"|10|"$10"|"$11; exit}'
+        '$1==id {print $9"|"$10"|"$11"|"$12"|"$13; found=1; exit} END {if(!found) print "0|0|0|0|0"}'
 }
 
 # Queue state update for batch write (appends to updates file)
@@ -117,24 +134,43 @@ queue_state_update() {
     local last_run="$4"
     local active_window="${5:-}"
     local flatrate="${6:-0}"
-    echo "${device_id}	${usage}	${prev_usage}	${last_run}	${active_window}	${flatrate}" >> "${STATE_FILE}.updates"
+    local paused="${7:-0}"
+    echo "${device_id}	${usage}	${prev_usage}	${last_run}	${active_window}	${flatrate}	${paused}" >> "${STATE_FILE}.updates"
 }
 
-# Queue calibration sample for batch write
-queue_calibration_sample() {
+# Queue calibration sample for phase 1 (idle)
+queue_calibration_sample_p1() {
     local device_id="$1"
     local sample="$2"
-    local new_counter="$3"
-    local timestamp="$4"
-    echo "CAL_SAMPLE	${device_id}	${sample}	${new_counter}	${timestamp}" >> "${STATE_FILE}.updates"
+    local timestamp="$3"
+    echo "CAL_SAMPLE_P1	${device_id}	${sample}	${timestamp}" >> "${STATE_FILE}.updates"
 }
 
-# Queue calibration completion
+# Queue calibration sample for phase 2 (usage)
+queue_calibration_sample_p2() {
+    local device_id="$1"
+    local sample="$2"
+    local timestamp="$3"
+    echo "CAL_SAMPLE_P2	${device_id}	${sample}	${timestamp}" >> "${STATE_FILE}.updates"
+}
+
+# Queue phase 1 completion
+queue_calibration_phase1_done() {
+    local device_id="$1"
+    echo "CAL_PHASE1_DONE	${device_id}" >> "${STATE_FILE}.updates"
+}
+
+# Queue calibration completion with two-phase results
 queue_calibration_complete() {
     local device_id="$1"
-    local p90="$2"
-    local recommended="$3"
-    echo "CAL_COMPLETE	${device_id}	${p90}	${recommended}" >> "${STATE_FILE}.updates"
+    local idle_p95="$2"
+    local idle_median="$3"
+    local stream_p5="$4"
+    local stream_median="$5"
+    local stream_outliers="$6"
+    local recommended="$7"
+    local overlap="$8"
+    echo "CAL_COMPLETE	${device_id}	${idle_p95}	${idle_median}	${stream_p5}	${stream_median}	${stream_outliers}	${recommended}	${overlap}" >> "${STATE_FILE}.updates"
 }
 
 # Mark calibration as failed
@@ -174,28 +210,48 @@ write_all_states() {
                 if (!line) continue;
                 let parts = split(line, '\t');
 
-                if (parts[0] === 'CAL_SAMPLE' && length(parts) >= 5) {
+                if (parts[0] === 'CAL_SAMPLE_P1' && length(parts) >= 4) {
                     let dev_id = parts[1];
                     let sample = int(parts[2]);
-                    let counter = int(parts[3]);
-                    let timestamp = int(parts[4]);
+                    let timestamp = int(parts[3]);
 
                     if (!state.devices[dev_id]) continue;
                     if (!state.devices[dev_id].calibration) {
-                        state.devices[dev_id].calibration = { samples: [] };
+                        state.devices[dev_id].calibration = { phase1_samples: [] };
                     }
-                    if (!state.devices[dev_id].calibration.samples) {
-                        state.devices[dev_id].calibration.samples = [];
+                    if (!state.devices[dev_id].calibration.phase1_samples) {
+                        state.devices[dev_id].calibration.phase1_samples = [];
                     }
 
-                    push(state.devices[dev_id].calibration.samples, sample);
-                    state.devices[dev_id].calibration.last_counter = counter;
+                    push(state.devices[dev_id].calibration.phase1_samples, sample);
                     state.devices[dev_id].calibration.last_sample_time = timestamp;
 
-                } else if (parts[0] === 'CAL_COMPLETE' && length(parts) >= 4) {
+                } else if (parts[0] === 'CAL_SAMPLE_P2' && length(parts) >= 4) {
                     let dev_id = parts[1];
-                    let p90 = int(parts[2]);
-                    let recommended = int(parts[3]);
+                    let sample = int(parts[2]);
+                    let timestamp = int(parts[3]);
+
+                    if (!state.devices[dev_id]) continue;
+                    if (!state.devices[dev_id].calibration) {
+                        state.devices[dev_id].calibration = { phase2_samples: [] };
+                    }
+                    if (!state.devices[dev_id].calibration.phase2_samples) {
+                        state.devices[dev_id].calibration.phase2_samples = [];
+                    }
+
+                    push(state.devices[dev_id].calibration.phase2_samples, sample);
+                    state.devices[dev_id].calibration.last_sample_time = timestamp;
+
+                } else if (parts[0] === 'CAL_PHASE1_DONE' && length(parts) >= 2) {
+                    let dev_id = parts[1];
+                    if (!state.devices[dev_id]) continue;
+                    if (!state.devices[dev_id].calibration) {
+                        state.devices[dev_id].calibration = {};
+                    }
+                    state.devices[dev_id].calibration.status = 'phase1_done';
+
+                } else if (parts[0] === 'CAL_COMPLETE' && length(parts) >= 9) {
+                    let dev_id = parts[1];
 
                     if (!state.devices[dev_id]) continue;
                     if (!state.devices[dev_id].calibration) {
@@ -203,8 +259,13 @@ write_all_states() {
                     }
 
                     state.devices[dev_id].calibration.status = 'completed';
-                    state.devices[dev_id].calibration.result_p90 = p90;
-                    state.devices[dev_id].calibration.result_recommended = recommended;
+                    state.devices[dev_id].calibration.result_idle_p95 = int(parts[2]);
+                    state.devices[dev_id].calibration.result_idle_median = int(parts[3]);
+                    state.devices[dev_id].calibration.result_stream_p5 = int(parts[4]);
+                    state.devices[dev_id].calibration.result_stream_median = int(parts[5]);
+                    state.devices[dev_id].calibration.result_stream_outliers = int(parts[6]);
+                    state.devices[dev_id].calibration.result_recommended = int(parts[7]);
+                    state.devices[dev_id].calibration.result_overlap = int(parts[8]);
 
                 } else if (parts[0] === 'CAL_ERROR' && length(parts) >= 3) {
                     let dev_id = parts[1];
@@ -229,6 +290,7 @@ write_all_states() {
                         last_run_time: int(parts[3]),
                         active_window: (length(parts) >= 5) ? parts[4] : '',
                         flatrate: (length(parts) >= 6) ? int(parts[5]) : 0,
+                        paused: (length(parts) >= 7) ? int(parts[6]) : 0,
                         calibration: existing_cal
                     };
                 }
@@ -317,6 +379,7 @@ process_rpc_updates() {
                     last_run_time: time(),
                     active_window: existing.active_window || '',
                     flatrate: (existing.flatrate != null) ? existing.flatrate : 0,
+                    paused: (existing.paused != null) ? existing.paused : 0,
                     calibration: existing.calibration || null
                 };
                 count++;
@@ -331,14 +394,14 @@ process_rpc_updates() {
                     last_run_time: (existing.last_run_time != null) ? existing.last_run_time : time(),
                     active_window: existing.active_window || '',
                     flatrate: val,
+                    paused: (existing.paused != null) ? existing.paused : 0,
                     calibration: existing.calibration || null
                 };
                 count++;
 
-            } else if (cmd === 'RPC_CAL_START' && length(parts) >= 4) {
+            } else if (cmd === 'RPC_PAUSE' && length(parts) >= 3) {
                 let id = parts[1];
-                let dur = int(parts[2]);
-                let interval = int(parts[3]);
+                let val = int(parts[2]);
                 let existing = state.devices[id] || {};
                 state.devices[id] = {
                     usage: (existing.usage != null) ? existing.usage : 0,
@@ -346,20 +409,67 @@ process_rpc_updates() {
                     last_run_time: (existing.last_run_time != null) ? existing.last_run_time : time(),
                     active_window: existing.active_window || '',
                     flatrate: (existing.flatrate != null) ? existing.flatrate : 0,
+                    paused: val,
+                    calibration: existing.calibration || null
+                };
+                count++;
+
+            } else if (cmd === 'RPC_CAL_START' && length(parts) >= 3) {
+                let id = parts[1];
+                let dur = int(parts[2]);
+                let idle_dur = int(dur / 2);
+                let usage_dur = dur - idle_dur;
+                let existing = state.devices[id] || {};
+                state.devices[id] = {
+                    usage: (existing.usage != null) ? existing.usage : 0,
+                    previous_usage: (existing.previous_usage != null) ? existing.previous_usage : 0,
+                    last_run_time: (existing.last_run_time != null) ? existing.last_run_time : time(),
+                    active_window: existing.active_window || '',
+                    flatrate: (existing.flatrate != null) ? existing.flatrate : 0,
+                    paused: (existing.paused != null) ? existing.paused : 0,
                     calibration: {
-                        status: 'running',
+                        status: 'phase1_running',
+                        total_duration: dur,
+                        idle_duration: idle_dur,
+                        usage_duration: usage_dur,
                         start_time: time(),
-                        duration: dur,
-                        sample_interval: interval,
-                        samples: [],
+                        phase2_start_time: 0,
+                        phase1_samples: [],
+                        phase2_samples: [],
                         last_sample_time: 0,
-                        last_counter: 0,
-                        result_p90: 0,
+                        result_idle_p95: 0,
+                        result_idle_median: 0,
+                        result_stream_p5: 0,
+                        result_stream_median: 0,
+                        result_stream_outliers: 0,
                         result_recommended: 0,
+                        result_overlap: 0,
                         error_message: ''
                     }
                 };
                 count++;
+
+            } else if (cmd === 'RPC_CAL_START_P2' && length(parts) >= 2) {
+                let id = parts[1];
+                let existing = state.devices[id] || {};
+                let cal = existing.calibration || {};
+
+                if (cal.status === 'phase1_done') {
+                    cal.status = 'phase2_running';
+                    cal.phase2_start_time = time();
+                    cal.last_sample_time = 0;
+
+                    state.devices[id] = {
+                        usage: (existing.usage != null) ? existing.usage : 0,
+                        previous_usage: (existing.previous_usage != null) ? existing.previous_usage : 0,
+                        last_run_time: (existing.last_run_time != null) ? existing.last_run_time : time(),
+                        active_window: existing.active_window || '',
+                        flatrate: (existing.flatrate != null) ? existing.flatrate : 0,
+                        paused: (existing.paused != null) ? existing.paused : 0,
+                        calibration: cal
+                    };
+                    count++;
+                }
 
             } else if (cmd === 'RPC_CAL_CLEAR' && length(parts) >= 2) {
                 let id = parts[1];
@@ -370,16 +480,24 @@ process_rpc_updates() {
                     last_run_time: (existing.last_run_time != null) ? existing.last_run_time : time(),
                     active_window: existing.active_window || '',
                     flatrate: (existing.flatrate != null) ? existing.flatrate : 0,
+                    paused: (existing.paused != null) ? existing.paused : 0,
                     calibration: {
                         status: 'idle',
+                        total_duration: 0,
+                        idle_duration: 0,
+                        usage_duration: 0,
                         start_time: 0,
-                        duration: 0,
-                        sample_interval: 10,
-                        samples: [],
+                        phase2_start_time: 0,
+                        phase1_samples: [],
+                        phase2_samples: [],
                         last_sample_time: 0,
-                        last_counter: 0,
-                        result_p90: 0,
+                        result_idle_p95: 0,
+                        result_idle_median: 0,
+                        result_stream_p5: 0,
+                        result_stream_median: 0,
+                        result_stream_outliers: 0,
                         result_recommended: 0,
+                        result_overlap: 0,
                         error_message: ''
                     }
                 };
@@ -461,12 +579,40 @@ read_flatrate_from_file() {
     echo "${flatrate:-0}"
 }
 
+# Read paused directly from state file (bypasses cache)
+# Used during midnight reset when cache may be stale
+read_paused_from_file() {
+    local device_id="$1"
+    if [ ! -f "$STATE_FILE" ]; then
+        echo "0"
+        return
+    fi
+
+    local paused=$(ucode -e "
+        import { open } from 'fs';
+        let f = open('$STATE_FILE', 'r');
+        if (!f) exit(0);
+        let content = f.read('all');
+        f.close();
+        if (!content || substr(trim(content), 0, 1) !== '{') { print('0'); exit(0); }
+        let state = json(content);
+        if (!state || !state.devices || !state.devices['$device_id']) {
+            print('0');
+            exit(0);
+        }
+        print(state.devices['$device_id'].paused || 0);
+    " 2>/dev/null)
+
+    echo "${paused:-0}"
+}
+
 # Reset device state (used during midnight reset)
 reset_device_state() {
     local device_id="$1"
-    # Read flatrate directly from file (cache is stale during midnight reset)
+    # Read flatrate and paused directly from file (cache is stale during midnight reset)
     # The cache (ALL_STATES) is from previous poll cycle and doesn't reflect
     # RPC updates processed earlier in this cycle
     local cached_flatrate=$(read_flatrate_from_file "$device_id")
-    queue_state_update "$device_id" 0 0 "$(date +%s)" "" "$cached_flatrate"
+    local cached_paused=$(read_paused_from_file "$device_id")
+    queue_state_update "$device_id" 0 0 "$(date +%s)" "" "$cached_flatrate" "$cached_paused"
 }

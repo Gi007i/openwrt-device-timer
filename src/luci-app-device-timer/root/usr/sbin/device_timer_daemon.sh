@@ -97,6 +97,7 @@ monitor_device() {
     device_enabled=$(uci get device_timer.$device_id.enabled 2>/dev/null || echo "1")
 
     local current_time=$(date +%s)
+    local current_day=$(LC_TIME=C TZ="$SYSTEM_TZ" date +%a)
 
     local FIREWALL_RULE_NAME="Block_Device_$device_id"
     local NFT_TABLE="inet device_timer_$device_id"
@@ -135,30 +136,30 @@ monitor_device() {
     fi
 
     # Get active schedule (returns "active|timerange|limit", "no_schedule", or "outside_window")
-    active_schedule=$(get_active_schedule "$device_id")
+    active_schedule=$(get_active_schedule "$device_id" "$current_day")
     schedule_status=$(echo "$active_schedule" | cut -d'|' -f1)
 
     case "$schedule_status" in
         no_schedule)
             manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "block"
-            # Update state to prevent time accumulation when schedule is added later
-            local current_time=$(date +%s)
+            # Reset usage: no active schedule, clean slate for when schedule is added
             local cached_flatrate=$(get_cached_flatrate "$device_id")
-            local daily_usage=$(get_cached_state "$device_id" 2 0)
-            queue_state_update "$device_id" "$daily_usage" 0 "$current_time" "" "$cached_flatrate"
-            # Reset counters to prevent accumulation
+            cached_flatrate=${cached_flatrate:-0}
+            local cached_paused=$(get_cached_paused "$device_id")
+            cached_paused=${cached_paused:-0}
+            queue_state_update "$device_id" 0 0 "$current_time" "" "$cached_flatrate" "$cached_paused"
             nft reset rules table $NFT_TABLE 2>/dev/null
             return
             ;;
         outside_window)
             manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "block"
-            # Update state to prevent large time_diff when window opens
-            # This prevents counting the entire outside_window period as usage
-            local current_time=$(date +%s)
+            # Reset usage: each window gets its own quota, don't carry over
+            # previous window's usage (prevents stale usage blocking new windows)
             local cached_flatrate=$(get_cached_flatrate "$device_id")
-            local daily_usage=$(get_cached_state "$device_id" 2 0)
-            queue_state_update "$device_id" "$daily_usage" 0 "$current_time" "" "$cached_flatrate"
-            # Reset counters to prevent accumulation
+            cached_flatrate=${cached_flatrate:-0}
+            local cached_paused=$(get_cached_paused "$device_id")
+            cached_paused=${cached_paused:-0}
+            queue_state_update "$device_id" 0 0 "$current_time" "" "$cached_flatrate" "$cached_paused"
             nft reset rules table $NFT_TABLE 2>/dev/null
             return
             ;;
@@ -176,7 +177,6 @@ monitor_device() {
     fi
 
     # Build window identifier for tracking (Day,TimeRange)
-    local current_day=$(LC_TIME=C TZ="$SYSTEM_TZ" date +%a)
     local window_id="${current_day},${active_timerange}"
     local stored_window=$(get_cached_window "$device_id")
 
@@ -224,6 +224,7 @@ monitor_device() {
                ! nft add rule $NFT_TABLE forward ip saddr $nft_ip counter || \
                ! nft add rule $NFT_TABLE forward ip daddr $nft_ip counter; then
                 log "[$device_id] Error: Failed to create nft rules, blocking device"
+                nft delete table $NFT_TABLE 2>/dev/null || true
                 manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "block"
                 return
             fi
@@ -261,8 +262,11 @@ monitor_device() {
     local daily_usage=$(get_cached_state "$device_id" 2 0)
 
     # Reset usage on window change (each window gets its own quota)
-    # Read flatrate before reset to preserve it
+    # Read flatrate and paused before reset to preserve them
     local cached_flatrate=$(get_cached_flatrate "$device_id")
+    cached_flatrate=${cached_flatrate:-0}
+    local cached_paused=$(get_cached_paused "$device_id")
+    cached_paused=${cached_paused:-0}
     if [ "$stored_window" != "$window_id" ]; then
         log "[$device_id] Window changed from ${stored_window:-none} to $window_id, resetting usage"
         daily_usage=0
@@ -278,6 +282,11 @@ monitor_device() {
     local usage_diff=$((total_usage - previous_usage))
     if [ "$usage_diff" -lt 0 ]; then
         usage_diff=$total_usage
+    fi
+    # Guard against counter overflow (unreasonably large delta, >2GB per interval)
+    if [ "$usage_diff" -gt 2000000000 ]; then
+        log "[$device_id] Warning: Unreasonable traffic delta ($usage_diff bytes), skipping"
+        usage_diff=0
     fi
 
     local time_diff=$((current_time - last_run_time))
@@ -317,11 +326,14 @@ monitor_device() {
 
     # Queue state update for batch write
     # previous_usage=0 because nft counters are reset after each poll (line below)
-    queue_state_update "$device_id" "$daily_usage" "0" "$current_time" "$window_id" "$cached_flatrate"
+    queue_state_update "$device_id" "$daily_usage" "0" "$current_time" "$window_id" "$cached_flatrate" "$cached_paused"
 
+    # Pause: highest priority — immediately block device
     # Flatrate: limit=0 means unlimited access (never block)
     # Flatrate flag also grants unlimited access (overrides limit check)
-    if [ "$cached_flatrate" -eq 1 ] || [ "$time_limit" -eq 0 ]; then
+    if [ "$cached_paused" -eq 1 ]; then
+        manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "block"
+    elif [ "$cached_flatrate" -eq 1 ] || [ "$time_limit" -eq 0 ]; then
         manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "unblock"
     elif [ "$((daily_usage / 60))" -ge "$time_limit" ]; then
         manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "block"
@@ -348,6 +360,7 @@ main() {
 
     # Cleanup orphaned resources on startup
     cleanup_orphaned_resources
+    commit_firewall_changes
 
     # Flush startup firewall changes if needed
     if [ "$FIREWALL_NEEDS_RELOAD" -eq 1 ]; then
@@ -388,7 +401,9 @@ main() {
         config_load device_timer
         config_foreach monitor_device_cb device
 
-        write_all_states
+        if ! write_all_states; then
+            log "Warning: Failed to write state file"
+        fi
 
         # Batch commit all firewall UCI changes, then reload
         commit_firewall_changes

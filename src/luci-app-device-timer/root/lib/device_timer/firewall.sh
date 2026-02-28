@@ -178,13 +178,8 @@ cleanup_orphaned_resources() {
     done
 
     if [ "$needs_reload" -eq 1 ]; then
-        if ! uci commit firewall; then
-            log "Warning: Failed to commit firewall cleanup changes"
-        else
-            FIREWALL_NEEDS_RELOAD=1
-            # Reset batch flag since this commit also flushes any staged changes
-            FIREWALL_NEEDS_COMMIT=0
-        fi
+        FIREWALL_NEEDS_COMMIT=1
+        FIREWALL_NEEDS_RELOAD=1
     fi
 
     # Cleanup orphaned nftables tables (device_timer_*)
@@ -253,6 +248,11 @@ cleanup_orphaned_resources() {
         fi
 
         # Atomic write with flock
-        [ -f "${STATE_FILE}.cleanup.tmp" ] && flock "$TEMP_DIR/state.lock" -c "mv '${STATE_FILE}.cleanup.tmp' '$STATE_FILE'"
+        if [ -f "${STATE_FILE}.cleanup.tmp" ]; then
+            if ! flock "$TEMP_DIR/state.lock" -c "mv '${STATE_FILE}.cleanup.tmp' '$STATE_FILE'" 2>/dev/null; then
+                log "Warning: Failed to apply state cleanup"
+                rm -f "${STATE_FILE}.cleanup.tmp"
+            fi
+        fi
     fi
 }

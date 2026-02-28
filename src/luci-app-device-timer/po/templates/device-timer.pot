@@ -115,6 +115,9 @@ msgstr ""
 msgid "Outside Window"
 msgstr ""
 
+msgid "Paused"
+msgstr ""
+
 msgid "Overlapping schedules on %s: %s and %s"
 msgstr ""
 
@@ -169,28 +172,10 @@ msgstr ""
 msgid "Calibration"
 msgstr ""
 
-msgid "Measures idle background traffic to determine the optimal usage detection threshold."
-msgstr ""
-
-msgid "Ensure the device is connected but not actively used during calibration."
-msgstr ""
-
 msgid "Idle"
 msgstr ""
 
-msgid "Progress"
-msgstr ""
-
-msgid "Elapsed: %d / %d seconds (%d samples)"
-msgstr ""
-
 msgid "Completed"
-msgstr ""
-
-msgid "P90"
-msgstr ""
-
-msgid "Recommended Threshold"
 msgstr ""
 
 msgid "Error"
@@ -202,25 +187,10 @@ msgstr ""
 msgid "Measurement Duration"
 msgstr ""
 
-msgid "5 minutes"
-msgstr ""
-
-msgid "15 minutes"
-msgstr ""
-
-msgid "30 minutes (recommended)"
-msgstr ""
-
-msgid "60 minutes"
-msgstr ""
-
 msgid "Actions"
 msgstr ""
 
 msgid "Cancel Calibration"
-msgstr ""
-
-msgid "Start Calibration"
 msgstr ""
 
 msgid "Calibration cancelled"
@@ -229,7 +199,7 @@ msgstr ""
 msgid "Failed"
 msgstr ""
 
-msgid "Calibration started"
+msgid "Phase 1 started — do not use the device during idle measurement."
 msgstr ""
 
 msgid "Apply"
@@ -248,4 +218,91 @@ msgid "Cancel"
 msgstr ""
 
 msgid "Threshold applied: %s"
+msgstr ""
+
+msgid "Recommended Threshold"
+msgstr ""
+
+msgid "Phase 1: Idle Measurement"
+msgstr ""
+
+msgid "Phase 1 Complete"
+msgstr ""
+
+msgid "Phase 2: Usage Measurement"
+msgstr ""
+
+msgid "Phase 1: Idle"
+msgstr ""
+
+msgid "Phase 2: Usage"
+msgstr ""
+
+msgid "Do not use the device during this phase."
+msgstr ""
+
+msgid "%d%% (%d samples)"
+msgstr ""
+
+msgid "Now use the device normally."
+msgstr ""
+
+msgid "Idle measurement complete."
+msgstr ""
+
+msgid "%d samples collected."
+msgstr ""
+
+msgid "Start using the device, then click the button below to begin usage measurement."
+msgstr ""
+
+msgid "Idle Traffic"
+msgstr ""
+
+msgid "Median"
+msgstr ""
+
+msgid "Usage Traffic"
+msgstr ""
+
+msgid "outliers removed"
+msgstr ""
+
+msgid "The result is a guideline — manual adjustment is recommended."
+msgstr ""
+
+msgid "Measures idle and active traffic in two phases to calculate the optimal usage detection threshold."
+msgstr ""
+
+msgid "A threshold of 1K is recommended during calibration to avoid the device being blocked."
+msgstr ""
+
+msgid "5 minutes (quick test)"
+msgstr ""
+
+msgid "15 minutes"
+msgstr ""
+
+msgid "30 minutes (recommended)"
+msgstr ""
+
+msgid "60 minutes (best accuracy)"
+msgstr ""
+
+msgid "Start Idle Measurement"
+msgstr ""
+
+msgid "Ensure the device is not being used, then click the button below to begin idle measurement."
+msgstr ""
+
+msgid "Start Usage Measurement"
+msgstr ""
+
+msgid "Phase 2 started — use the device normally now."
+msgstr ""
+
+msgid "Idle Results"
+msgstr ""
+
+msgid "Idle traffic overlaps with usage traffic — result may be unreliable."
 msgstr ""

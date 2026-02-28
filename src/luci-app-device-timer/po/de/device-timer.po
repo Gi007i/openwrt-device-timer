@@ -116,6 +116,9 @@ msgstr "Nicht überlappende Zeitfenster pro Tag."
 msgid "Outside Window"
 msgstr "Außerhalb Zeitfenster"
 
+msgid "Paused"
+msgstr "Pausiert"
+
 msgid "Overlapping schedules on %s: %s and %s"
 msgstr "Überlappende Zeitpläne am %s: %s und %s"
 
@@ -170,29 +173,11 @@ msgstr "Globalen Standard verwenden"
 msgid "Calibration"
 msgstr "Kalibrierung"
 
-msgid "Measures idle background traffic to determine the optimal usage detection threshold."
-msgstr "Misst den Hintergrund-Traffic im Leerlauf, um den optimalen Schwellwert für die Nutzungserkennung zu bestimmen."
-
-msgid "Ensure the device is connected but not actively used during calibration."
-msgstr "Stellen Sie sicher, dass das Gerät verbunden, aber nicht aktiv genutzt wird während der Kalibrierung."
-
 msgid "Idle"
 msgstr "Inaktiv"
 
-msgid "Progress"
-msgstr "Fortschritt"
-
-msgid "Elapsed: %d / %d seconds (%d samples)"
-msgstr "Vergangen: %d / %d Sekunden (%d Samples)"
-
 msgid "Completed"
 msgstr "Abgeschlossen"
-
-msgid "P90"
-msgstr "P90"
-
-msgid "Recommended Threshold"
-msgstr "Empfohlener Schwellwert"
 
 msgid "Error"
 msgstr "Fehler"
@@ -203,26 +188,11 @@ msgstr "Unbekannter Fehler"
 msgid "Measurement Duration"
 msgstr "Messdauer"
 
-msgid "5 minutes"
-msgstr "5 Minuten"
-
-msgid "15 minutes"
-msgstr "15 Minuten"
-
-msgid "30 minutes (recommended)"
-msgstr "30 Minuten (empfohlen)"
-
-msgid "60 minutes"
-msgstr "60 Minuten"
-
 msgid "Actions"
 msgstr "Aktionen"
 
 msgid "Cancel Calibration"
 msgstr "Kalibrierung abbrechen"
-
-msgid "Start Calibration"
-msgstr "Kalibrierung starten"
 
 msgid "Calibration cancelled"
 msgstr "Kalibrierung abgebrochen"
@@ -230,8 +200,8 @@ msgstr "Kalibrierung abgebrochen"
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
-msgid "Calibration started"
-msgstr "Kalibrierung gestartet"
+msgid "Phase 1 started — do not use the device during idle measurement."
+msgstr "Phase 1 gestartet — Gerät während der Leerlauf-Messung nicht benutzen."
 
 msgid "Apply"
 msgstr "Anwenden"
@@ -250,3 +220,90 @@ msgstr "Abbrechen"
 
 msgid "Threshold applied: %s"
 msgstr "Schwellwert angewendet: %s"
+
+msgid "Recommended Threshold"
+msgstr "Empfohlener Schwellwert"
+
+msgid "Phase 1: Idle Measurement"
+msgstr "Phase 1: Leerlauf-Messung"
+
+msgid "Phase 1 Complete"
+msgstr "Phase 1 abgeschlossen"
+
+msgid "Phase 2: Usage Measurement"
+msgstr "Phase 2: Nutzungs-Messung"
+
+msgid "Phase 1: Idle"
+msgstr "Phase 1: Leerlauf"
+
+msgid "Phase 2: Usage"
+msgstr "Phase 2: Nutzung"
+
+msgid "Do not use the device during this phase."
+msgstr "Gerät während dieser Phase nicht benutzen."
+
+msgid "%d%% (%d samples)"
+msgstr "%d%% (%d Samples)"
+
+msgid "Now use the device normally."
+msgstr "Gerät jetzt normal benutzen."
+
+msgid "Idle measurement complete."
+msgstr "Leerlauf-Messung abgeschlossen."
+
+msgid "%d samples collected."
+msgstr "%d Samples gesammelt."
+
+msgid "Start using the device, then click the button below to begin usage measurement."
+msgstr "Gerät jetzt benutzen, dann den Button unten klicken um die Nutzungs-Messung zu starten."
+
+msgid "Idle Traffic"
+msgstr "Idle-Traffic"
+
+msgid "Median"
+msgstr "Median"
+
+msgid "Usage Traffic"
+msgstr "Nutzungs-Traffic"
+
+msgid "outliers removed"
+msgstr "Ausreißer entfernt"
+
+msgid "The result is a guideline — manual adjustment is recommended."
+msgstr "Das Ergebnis ist ein Orientierungswert — manuelle Anpassung wird empfohlen."
+
+msgid "Measures idle and active traffic in two phases to calculate the optimal usage detection threshold."
+msgstr "Misst Idle- und Nutzungs-Traffic in zwei Phasen, um den optimalen Schwellwert zu berechnen."
+
+msgid "A threshold of 1K is recommended during calibration to avoid the device being blocked."
+msgstr "Für die Kalibrierung wird ein Schwellwert von 1K empfohlen, damit das Gerät nicht blockiert wird."
+
+msgid "5 minutes (quick test)"
+msgstr "5 Minuten (Schnelltest)"
+
+msgid "15 minutes"
+msgstr "15 Minuten"
+
+msgid "30 minutes (recommended)"
+msgstr "30 Minuten (empfohlen)"
+
+msgid "60 minutes (best accuracy)"
+msgstr "60 Minuten (beste Genauigkeit)"
+
+msgid "Start Idle Measurement"
+msgstr "Leerlauf-Messung starten"
+
+msgid "Ensure the device is not being used, then click the button below to begin idle measurement."
+msgstr "Sicherstellen, dass das Gerät nicht benutzt wird, dann den Button unten klicken, um die Leerlauf-Messung zu starten."
+
+msgid "Start Usage Measurement"
+msgstr "Nutzungs-Messung starten"
+
+msgid "Phase 2 started — use the device normally now."
+msgstr "Phase 2 gestartet — Gerät jetzt normal benutzen."
+
+msgid "Idle Results"
+msgstr "Leerlauf-Ergebnisse"
+
+msgid "Idle traffic overlaps with usage traffic — result may be unreliable."
+msgstr "Idle-Traffic überlappt mit Nutzungs-Traffic — Ergebnis möglicherweise unzuverlässig."

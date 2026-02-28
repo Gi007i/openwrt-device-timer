@@ -49,7 +49,9 @@ All API calls follow the ubus JSON-RPC format:
 | [`getcalibration`](#getcalibration) | READ | Get calibration progress and results |
 | [`reset`](#reset) | WRITE | Reset usage counter for a device |
 | [`setflatrate`](#setflatrate) | WRITE | Enable or disable flatrate mode |
-| [`startcalibration`](#startcalibration) | WRITE | Start traffic threshold calibration |
+| [`setpause`](#setpause) | WRITE | Temporarily block a device (overrides flatrate) |
+| [`startcalibration`](#startcalibration) | WRITE | Start calibration phase 1 (idle measurement) |
+| [`startcalibrationphase2`](#startcalibrationphase2) | WRITE | Start calibration phase 2 (usage measurement) |
 | [`applycalibration`](#applycalibration) | WRITE | Apply calibration result as threshold |
 | [`cancelcalibration`](#cancelcalibration) | WRITE | Cancel a running calibration |
 
@@ -95,7 +97,8 @@ curl -s -X POST http://ROUTER_IP/ubus \
       "in_time_window": 1,
       "todays_timerange": "14:00-18:00",
       "traffic_threshold": "6M",
-      "flatrate_active": 0
+      "flatrate_active": 0,
+      "pause_active": 0
     }
   ]
 }
@@ -104,6 +107,7 @@ curl -s -X POST http://ROUTER_IP/ubus \
 | Field | Type | Description |
 |-------|------|-------------|
 | `traffic_threshold` | string\|null | Per-device traffic threshold (e.g. `"6M"`), or `null` if using global default |
+| `pause_active` | int | `1` if device is paused (blocked), `0` otherwise |
 
 ---
 
@@ -147,7 +151,8 @@ curl -s -X POST http://ROUTER_IP/ubus \
   "in_time_window": 1,
   "todays_timerange": "14:00-18:00",
   "traffic_threshold": "6M",
-  "flatrate_active": 0
+  "flatrate_active": 0,
+  "pause_active": 0
 }
 ```
 
@@ -289,7 +294,7 @@ curl -s -X POST http://ROUTER_IP/ubus \
 
 ### getcalibration
 
-Get the current calibration status and results for a device.
+Get the current two-phase calibration status and results for a device. Calibration runs in two phases: phase 1 measures idle traffic, phase 2 measures active usage traffic. The recommended threshold is the geometric mean of idle P95 and usage P5.
 
 **Parameters:**
 
@@ -316,27 +321,32 @@ curl -s -X POST http://ROUTER_IP/ubus \
 {
   "id": "tablet_kid",
   "status": "idle",
-  "elapsed": 0,
-  "duration": 0,
-  "sample_count": 0,
-  "progress_percent": 0
+  "phase1_elapsed": 0,
+  "phase2_elapsed": 0,
+  "idle_duration": 0,
+  "usage_duration": 0,
+  "phase1_samples": 0,
+  "phase2_samples": 0,
+  "phase1_progress": 0,
+  "phase2_progress": 0
 }
 ```
 
-**Response (running):**
+**Response (phase 1 running):**
 
 ```json
 {
   "id": "tablet_kid",
-  "status": "running",
-  "elapsed": 450,
-  "duration": 1800,
-  "sample_interval": 10,
-  "sample_count": 45,
-  "progress_percent": 25,
-  "result_p90": 0,
-  "result_recommended": 0,
-  "error_message": ""
+  "status": "phase1_running",
+  "phase1_elapsed": 450,
+  "phase2_elapsed": 0,
+  "idle_duration": 900,
+  "usage_duration": 900,
+  "poll_interval": 60,
+  "phase1_samples": 7,
+  "phase2_samples": 0,
+  "phase1_progress": 50,
+  "phase2_progress": 0
 }
 ```
 
@@ -346,32 +356,52 @@ curl -s -X POST http://ROUTER_IP/ubus \
 {
   "id": "tablet_kid",
   "status": "completed",
-  "elapsed": 1800,
-  "duration": 1800,
-  "sample_interval": 10,
-  "sample_count": 180,
-  "progress_percent": 100,
-  "result_p90": 5242880,
-  "result_recommended": 6291456,
+  "phase1_elapsed": 900,
+  "phase2_elapsed": 900,
+  "idle_duration": 900,
+  "usage_duration": 900,
+  "poll_interval": 60,
+  "phase1_samples": 15,
+  "phase2_samples": 15,
+  "phase1_progress": 100,
+  "phase2_progress": 100,
+  "result_idle_p95": 4061,
+  "result_idle_median": 1200,
+  "result_stream_p5": 1266317,
+  "result_stream_median": 2100000,
+  "result_stream_outliers": 2,
+  "result_recommended": 71680,
+  "result_overlap": 0,
   "error_message": ""
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `status` | string | `idle`, `running`, `completed`, or `error` |
-| `elapsed` | int | Seconds elapsed since calibration start |
-| `duration` | int | Total calibration duration in seconds |
-| `sample_interval` | int | Seconds between traffic samples (only present when calibration is active or completed) |
-| `sample_count` | int | Number of traffic samples collected |
-| `progress_percent` | int | Completion percentage (0–100) |
-| `result_p90` | int | 90th percentile traffic value in bytes (only present when calibration is active or completed) |
-| `result_recommended` | int | Recommended threshold in bytes (only present when calibration is active or completed) |
-| `error_message` | string | Error description (only present when calibration is active or completed, set by daemon) |
+| `id` | string | Device identifier |
+| `status` | string | `idle`, `phase1_running`, `phase1_done`, `phase2_running`, `completed`, or `error` |
+| `phase1_elapsed` | int | Seconds elapsed in phase 1 (idle measurement) |
+| `phase2_elapsed` | int | Seconds elapsed in phase 2 (usage measurement) |
+| `idle_duration` | int | Total duration of phase 1 in seconds (half of total duration) |
+| `usage_duration` | int | Total duration of phase 2 in seconds (half of total duration) |
+| `poll_interval` | int | Daemon polling interval in seconds (only present when calibration data exists) |
+| `phase1_samples` | int | Number of idle traffic samples collected |
+| `phase2_samples` | int | Number of usage traffic samples collected |
+| `phase1_progress` | int | Phase 1 completion percentage (0–100) |
+| `phase2_progress` | int | Phase 2 completion percentage (0–100) |
+| `result_idle_p95` | int | 95th percentile of idle traffic in bytes |
+| `result_idle_median` | int | Median idle traffic in bytes |
+| `result_stream_p5` | int | 5th percentile of usage traffic in bytes (after IQR outlier removal) |
+| `result_stream_median` | int | Median usage traffic in bytes |
+| `result_stream_outliers` | int | Number of streaming samples removed as outliers |
+| `result_recommended` | int | Recommended threshold in bytes: `sqrt(idle_p95 × stream_p5)` |
+| `result_overlap` | int | `1` if idle traffic overlaps with usage traffic (result may be unreliable), `0` otherwise |
+| `error_message` | string | Error description (set by daemon on failure) |
 
 **Errors:**
 - `Missing device id`
 - `Invalid device id`
+- `Device not found`
 
 ---
 
@@ -459,17 +489,60 @@ curl -s -X POST http://ROUTER_IP/ubus \
 
 ---
 
+### setpause
+
+Temporarily block a device's internet access. When enabled, the device is immediately blocked regardless of schedule, usage, or flatrate status. Pause takes priority over all other access rules. The daemon is signaled to process the change immediately.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | UCI section ID of the device |
+| `enabled` | int | Yes | `1` to pause (block), `0` to unpause |
+
+**Request:**
+
+```sh
+curl -s -X POST http://ROUTER_IP/ubus \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "call",
+    "params": ["TOKEN", "luci.device-timer", "setpause", {"id": "tablet_kid", "enabled": 1}]
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "id": "tablet_kid",
+  "paused": 1,
+  "message": "Pause enabled"
+}
+```
+
+**Errors:**
+- `Missing device id`
+- `Missing enabled parameter`
+- `Invalid device id`
+- `Invalid enabled value (must be 0 or 1)`
+- `Device not found`
+
+---
+
 ### startcalibration
 
-Start a traffic threshold calibration run. The daemon samples the device's traffic at regular intervals and calculates a recommended threshold based on the 90th percentile.
+Start a two-phase calibration run. Phase 1 (idle measurement) begins immediately. The total duration is split equally between the two phases. Traffic is sampled once per daemon poll interval.
 
 **Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | string | Yes | — | UCI section ID of the device |
-| `duration` | int | No | `1800` | Calibration duration in seconds (300–3600) |
-| `sample_interval` | int | No | `10` | Seconds between samples (5–30) |
+| `duration` | int | No | `1800` | Total calibration duration in seconds (300–3600), split 50/50 between phases |
 
 **Request:**
 
@@ -482,8 +555,7 @@ curl -s -X POST http://ROUTER_IP/ubus \
     "method": "call",
     "params": ["TOKEN", "luci.device-timer", "startcalibration", {
       "id": "tablet_kid",
-      "duration": 1800,
-      "sample_interval": 10
+      "duration": 1800
     }]
   }'
 ```
@@ -495,8 +567,7 @@ curl -s -X POST http://ROUTER_IP/ubus \
   "success": true,
   "id": "tablet_kid",
   "duration": 1800,
-  "sample_interval": 10,
-  "message": "Calibration started"
+  "message": "Calibration started (phase 1: idle measurement)"
 }
 ```
 
@@ -505,8 +576,47 @@ curl -s -X POST http://ROUTER_IP/ubus \
 - `Invalid device id`
 - `Device not found`
 - `Device must be enabled for calibration`
-- `Duration must be between 5 and 60 minutes (300-3600s)`
-- `Sample interval must be between 5 and 30 seconds`
+- `Duration must be between 5 and 60 minutes`
+
+---
+
+### startcalibrationphase2
+
+Start calibration phase 2 (usage measurement). Phase 1 must be completed first (`phase1_done` status). The user should actively use the device during this phase to generate representative traffic.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | UCI section ID of the device |
+
+**Request:**
+
+```sh
+curl -s -X POST http://ROUTER_IP/ubus \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "call",
+    "params": ["TOKEN", "luci.device-timer", "startcalibrationphase2", {"id": "tablet_kid"}]
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "id": "tablet_kid",
+  "message": "Calibration phase 2 started (usage measurement)"
+}
+```
+
+**Errors:**
+- `Missing device id`
+- `Invalid device id`
+- `Phase 1 must be completed before starting phase 2`
 
 ---
 
@@ -555,7 +665,7 @@ curl -s -X POST http://ROUTER_IP/ubus \
 
 ### cancelcalibration
 
-Cancel a running calibration. Has no effect if no calibration is in progress.
+Cancel an active calibration (any phase). Has no effect if calibration status is `idle`.
 
 **Parameters:**
 
@@ -589,7 +699,7 @@ curl -s -X POST http://ROUTER_IP/ubus \
 **Errors:**
 - `Missing device id`
 - `Invalid device id`
-- `No running calibration to cancel`
+- `No active calibration to cancel`
 
 ---
 
@@ -600,6 +710,7 @@ The `status` field in device responses indicates the current state:
 | Status | Description |
 |--------|-------------|
 | `active` | Device is within its time window and has remaining usage time |
+| `paused` | Device is temporarily blocked via pause API (overrides all other rules) |
 | `blocked` | Usage limit for the current time window has been reached, device is blocked by firewall |
 | `unlimited` | Flatrate mode is enabled or the schedule limit is set to `0` |
 | `outside_window` | Device has schedules for today but none is currently active |

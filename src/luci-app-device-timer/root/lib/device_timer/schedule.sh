@@ -7,9 +7,10 @@
 # Get active schedule for today
 # Returns: "active|timerange|limit" or "no_schedule" or "outside_window"
 # Format: "Mon,14:00-18:00,60" (Day,TimeRange,Limit)
+# $1: device_id, $2: current_day (e.g., "Mon") — passed by caller to avoid redundant date calls
 get_active_schedule() {
     local device_id="$1"
-    local current_day=$(LC_TIME=C TZ="$SYSTEM_TZ" date +%a)
+    local current_day="$2"
     local found_today=0
     local active_timerange=""
     local active_limit=""
@@ -92,20 +93,26 @@ reset_device() {
     local FIREWALL_RULE_NAME="Block_Device_$device_id"
     local NFT_TABLE="inet device_timer_$device_id"
 
-    # Reset device state in JSON
+    # Read paused status before reset (for conditional unblock)
+    local cached_paused=$(read_paused_from_file "$device_id")
+
+    # Reset device state in JSON (preserves paused and flatrate)
     reset_device_state "$device_id"
 
     # Reset nftables counters to prevent old traffic from being counted
     nft reset rules table $NFT_TABLE 2>/dev/null
 
-    # Also unblock device on reset (new day)
-    device_mac=$(uci get device_timer.$device_id.mac 2>/dev/null | tr 'A-F' 'a-f')
-    # Validate MAC format before using
-    if [ -n "$device_mac" ] && echo "$device_mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'; then
-        manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "unblock"
+    # Unblock device on reset (new day) unless paused
+    if [ "$cached_paused" != "1" ]; then
+        device_mac=$(uci get device_timer.$device_id.mac 2>/dev/null | tr 'A-F' 'a-f')
+        # Validate MAC format before using
+        if [ -n "$device_mac" ] && echo "$device_mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'; then
+            manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "unblock"
+        fi
+        log "[$device_id] Counters reset and firewall unblocked"
+    else
+        log "[$device_id] Counters reset (paused, staying blocked)"
     fi
-
-    log "[$device_id] Counters reset and firewall unblocked"
 }
 
 reset_device_cb() {
@@ -129,6 +136,15 @@ check_midnight_reset() {
 
         # Write queued reset states immediately
         write_all_states
+
+        # Commit and reload firewall immediately so devices are unblocked at midnight
+        commit_firewall_changes
+        if [ "$FIREWALL_NEEDS_RELOAD" -eq 1 ]; then
+            if ! /etc/init.d/firewall reload; then
+                log "Warning: Firewall reload failed during midnight reset"
+            fi
+            FIREWALL_NEEDS_RELOAD=0
+        fi
 
         echo "$current_date" > "$LAST_DATE_FILE"
     fi
