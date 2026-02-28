@@ -351,7 +351,8 @@ monitor_device_cb() {
 
 main() {
     trap cleanup TERM INT
-    trap 'true' USR1
+    # USR1 from procd reload trigger: wake from sleep and run cleanup next cycle
+    trap 'CLEANUP_COUNTER=$CLEANUP_INTERVAL' USR1
 
     mkdir -p "$TEMP_DIR"
     echo $$ > "$PID_FILE"

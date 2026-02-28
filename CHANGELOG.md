@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.1] - 2026-02-28
+
+### Fixed
+- Fix orphaned firewall rules not deleted when removing a device with multiple devices configured
+- Trigger immediate cleanup on config change instead of waiting up to 10 minutes
+
 ## [1.2.0] - 2026-02-27
 
 ### Added
@@ -26,7 +32,6 @@
 
 ### Documentation
 - Update api-reference with calibration and pause endpoints
-- Add validation test script for router deployment (40 tests)
 
 ## [1.1.0] - 2026-02-25
 

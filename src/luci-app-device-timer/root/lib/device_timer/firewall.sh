@@ -178,8 +178,14 @@ cleanup_orphaned_resources() {
     done
 
     if [ "$needs_reload" -eq 1 ]; then
-        FIREWALL_NEEDS_COMMIT=1
-        FIREWALL_NEEDS_RELOAD=1
+        if ! uci commit firewall; then
+            log "Warning: Failed to commit firewall cleanup changes"
+            uci revert firewall
+        else
+            FIREWALL_NEEDS_RELOAD=1
+            # Reset batch flag since this commit also flushes any staged changes
+            FIREWALL_NEEDS_COMMIT=0
+        fi
     fi
 
     # Cleanup orphaned nftables tables (device_timer_*)
