@@ -129,9 +129,9 @@ monitor_device() {
         return
     fi
 
-    # If device monitoring is disabled, ensure it's unblocked and cleaned up
+    # If device monitoring is disabled, block device (default deny) and clean up
     if [ "$device_enabled" != "1" ]; then
-        manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "unblock"
+        manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "block"
         nft delete table $NFT_TABLE 2>/dev/null || true
         rm -f "$TEMP_DIR/${device_id}_nft_ip"
         return

@@ -192,6 +192,7 @@ sync:
       git remote set-url origin "https://oauth2:${RELEASE_TOKEN}@gitlab.com/${CI_PROJECT_PATH}.git"
       GITHUB_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git"
       git remote add github "${GITHUB_URL}"
+      git fetch origin main --tags
       git fetch github main --tags || { echo "WARNING: GitHub unreachable"; exit 0; }
 
       # Fast-forward main if behind
@@ -210,7 +211,7 @@ sync:
       fi
 
       # Push missing tags
-      GITLAB_TAGS=$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}')
+      GITLAB_TAGS=$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' || true)
       for tag in $(git tag -l 'v*'); do
         if ! echo "$GITLAB_TAGS" | grep -qx "$tag"; then
           git push origin "$tag"

@@ -102,8 +102,9 @@ reset_device() {
     # Reset nftables counters to prevent old traffic from being counted
     nft reset rules table $NFT_TABLE 2>/dev/null
 
-    # Unblock device on reset (new day) unless paused
-    if [ "$cached_paused" != "1" ]; then
+    # Unblock device on reset (new day) unless paused or disabled
+    local device_enabled=$(uci get device_timer.$device_id.enabled 2>/dev/null || echo "1")
+    if [ "$cached_paused" != "1" ] && [ "$device_enabled" = "1" ]; then
         device_mac=$(uci get device_timer.$device_id.mac 2>/dev/null | tr 'A-F' 'a-f')
         # Validate MAC format before using
         if [ -n "$device_mac" ] && echo "$device_mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'; then
@@ -111,7 +112,7 @@ reset_device() {
         fi
         log "[$device_id] Counters reset and firewall unblocked"
     else
-        log "[$device_id] Counters reset (paused, staying blocked)"
+        log "[$device_id] Counters reset (staying blocked: paused=$cached_paused, enabled=$device_enabled)"
     fi
 }
 

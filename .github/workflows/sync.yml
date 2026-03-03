@@ -41,7 +41,7 @@ jobs:
           fi
 
           # Push missing tags
-          ORIGIN_TAGS=$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}')
+          ORIGIN_TAGS=$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' || true)
           for tag in $(git tag -l 'v*'); do
             if ! echo "$ORIGIN_TAGS" | grep -qx "$tag"; then
               git push origin "$tag"

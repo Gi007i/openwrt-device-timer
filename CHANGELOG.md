@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1] - 2026-03-03
+
+### Fixed
+- Block disabled devices by default instead of allowing unrestricted access (default-deny)
+- Prevent midnight reset from unblocking disabled devices
+- Write explicit UCI value on enabled flag toggle instead of deleting the option
+
 ## [1.3.0] - 2026-03-03
 
 ### Fixed

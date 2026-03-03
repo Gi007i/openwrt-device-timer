@@ -768,6 +768,7 @@ return view.extend({
 		o = s.taboption('general', form.Flag, 'enabled', _('Enabled'));
 		o.editable = true;
 		o.default = '1';
+		o.rmempty = false;
 
 		o = s.taboption('general', form.Value, 'name', _('Name'));
 		o.rmempty = false;
