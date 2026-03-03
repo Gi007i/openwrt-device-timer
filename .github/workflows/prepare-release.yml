@@ -26,7 +26,8 @@ jobs:
 
       - name: Prepare release commit
         env:
-          PAGES_URL: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          GITHUB_PAGES_URL: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          GITLAB_PAGES_URL: "https://${{ github.repository_owner }}.gitlab.io/${{ github.event.repository.name }}"
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
@@ -36,7 +37,8 @@ jobs:
           git checkout main
           git merge --squash "origin/${GITHUB_REF_NAME}"
           # Replace placeholders in README
-          sed -i "s|__PAGES_URL__|${PAGES_URL}|g" README.md
+          sed -i "s|__GITHUB_PAGES_URL__|${GITHUB_PAGES_URL}|g" README.md
+          sed -i "s|__GITLAB_PAGES_URL__|${GITLAB_PAGES_URL}|g" README.md
           sed -i "s|__VERSION__|${VERSION}|g" README.md
           # Set PKG_VERSION in Makefile
           sed -i "s|^PKG_VERSION:=.*|PKG_VERSION:=${VERSION}|" src/luci-app-device-timer/Makefile

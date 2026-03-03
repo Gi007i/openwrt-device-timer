@@ -22,25 +22,42 @@ LuCI app for monitoring and limiting the usage time of network devices. Automati
 
 ## Installation
 
+The package is available from two mirrors:
+
+| Mirror | Feed URL |
+|---|---|
+| GitHub | `https://Gi007i.github.io/openwrt-device-timer/packages` |
+| GitLab | `https://Gi007i.gitlab.io/openwrt-device-timer/packages` |
+
 ### Via LuCI Web Interface
 
 1. In LuCI go to **System → Software**
-2. Under **Download and install package**, paste this URL and click **OK**:
-   ```
-   https://Gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer_1.3.1-r1_all.ipk
-   ```
+2. Under **Download and install package**, paste one of these URLs and click **OK**:
+   - `https://Gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer_1.3.2-r1_all.ipk`
+   - `https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-app-device-timer_1.3.2-r1_all.ipk`
 3. Repeat for the German translation:
-   ```
-   https://Gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de_1.3.1-1_all.ipk
-   ```
+   - `https://Gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de_1.3.2-1_all.ipk`
+   - `https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-i18n-device-timer-de_1.3.2-1_all.ipk`
 
 This installs the package, the feed signing key and registers the package feed automatically. Future updates are available through **System → Software → Updates**.
 
 ### Via SSH
 
+Choose one mirror and run:
+
 ```sh
+# GitHub mirror
 wget -O /etc/opkg/keys/608ca90e3cad75e0 https://Gi007i.github.io/openwrt-device-timer/keys/608ca90e3cad75e0
 echo 'src/gz device_timer https://Gi007i.github.io/openwrt-device-timer/packages' >> /etc/opkg/customfeeds.conf
+```
+
+```sh
+# GitLab mirror
+wget -O /etc/opkg/keys/608ca90e3cad75e0 https://Gi007i.gitlab.io/openwrt-device-timer/keys/608ca90e3cad75e0
+echo 'src/gz device_timer https://Gi007i.gitlab.io/openwrt-device-timer/packages' >> /etc/opkg/customfeeds.conf
+```
+
+```sh
 opkg update
 opkg install luci-app-device-timer luci-i18n-device-timer-de
 ```

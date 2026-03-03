@@ -246,7 +246,9 @@ prepare-release:
       git checkout main
       git merge --squash "origin/${CI_COMMIT_BRANCH}"
       # Replace placeholders in README
-      sed -i "s|__PAGES_URL__|${CI_PAGES_URL}|g" README.md
+      GITHUB_PAGES_URL="https://Gi007i.github.io/openwrt-device-timer"
+      sed -i "s|__GITHUB_PAGES_URL__|${GITHUB_PAGES_URL}|g" README.md
+      sed -i "s|__GITLAB_PAGES_URL__|${CI_PAGES_URL}|g" README.md
       sed -i "s|__VERSION__|${VERSION}|g" README.md
       # Set PKG_VERSION in Makefile
       sed -i "s|^PKG_VERSION:=.*|PKG_VERSION:=${VERSION}|" src/luci-app-device-timer/Makefile
