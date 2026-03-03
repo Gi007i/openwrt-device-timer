@@ -27,6 +27,7 @@ jobs:
       - name: Prepare release commit
         env:
           PAGES_URL: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
@@ -45,5 +46,8 @@ jobs:
           git tag "v${VERSION}"
           git push origin main
           git push origin "v${VERSION}"
+          # Cross-push to GitLab
+          git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitLab push (main) failed"
+          git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" "v${VERSION}" || echo "WARNING: GitLab push (tag) failed"
           # Delete release branch
           git push origin --delete "${GITHUB_REF_NAME}" || true

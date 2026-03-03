@@ -209,17 +209,8 @@ msgstr "Anwenden"
 msgid "Apply Recommended Threshold"
 msgstr "Empfohlenen Schwellwert anwenden"
 
-msgid "Apply Calibration"
-msgstr "Kalibrierung anwenden"
-
-msgid "This will update the traffic threshold for this device. Continue?"
-msgstr "Dies wird den Traffic-Schwellwert für dieses Gerät aktualisieren. Fortfahren?"
-
 msgid "Cancel"
 msgstr "Abbrechen"
-
-msgid "Threshold applied: %s"
-msgstr "Schwellwert angewendet: %s"
 
 msgid "Recommended Threshold"
 msgstr "Empfohlener Schwellwert"

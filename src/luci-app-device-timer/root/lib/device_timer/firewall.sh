@@ -24,8 +24,11 @@ commit_firewall_changes() {
 flush_conntrack_ips() {
     local ip
     for ip in $CONNTRACK_FLUSH_IPS; do
-        echo "$ip" > /proc/net/nf_conntrack 2>/dev/null
-        log "Flushed conntrack entries for $ip"
+        if echo "$ip" > /proc/net/nf_conntrack 2>/dev/null; then
+            log "Flushed conntrack entries for $ip"
+        else
+            log "Warning: Failed to flush conntrack for $ip"
+        fi
     done
     CONNTRACK_FLUSH_IPS=""
 }

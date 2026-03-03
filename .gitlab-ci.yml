@@ -6,8 +6,10 @@ workflow:
     - if: $CI_COMMIT_TAG =~ /^v/
     - if: $CI_COMMIT_BRANCH =~ /^release\//
     - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
 
 stages:
+  - sync
   - prepare
   - build
   - release
@@ -173,6 +175,50 @@ pages:
     paths:
       - public
 
+sync:
+  stage: sync
+  image:
+    name: alpine/git:latest
+    entrypoint: [""]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  variables:
+    GIT_STRATEGY: clone
+    GIT_DEPTH: 0
+  script:
+    - |
+      git config user.name "gitlab-ci[bot]"
+      git config user.email "gitlab-ci[bot]@users.noreply.gitlab.com"
+      git remote set-url origin "https://oauth2:${RELEASE_TOKEN}@gitlab.com/${CI_PROJECT_PATH}.git"
+      GITHUB_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git"
+      git remote add github "${GITHUB_URL}"
+      git fetch github main --tags || { echo "WARNING: GitHub unreachable"; exit 0; }
+
+      # Fast-forward main if behind
+      git checkout main
+      if git merge-base --is-ancestor HEAD github/main 2>/dev/null; then
+        if [ "$(git rev-parse HEAD)" != "$(git rev-parse github/main)" ]; then
+          git merge --ff-only github/main
+          git push origin main
+          echo "main synced from GitHub"
+        else
+          echo "main already up to date"
+        fi
+      else
+        echo "ERROR: main branches have diverged, manual resolution needed"
+        exit 1
+      fi
+
+      # Push missing tags
+      GITLAB_TAGS=$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}')
+      for tag in $(git tag -l 'v*'); do
+        if ! echo "$GITLAB_TAGS" | grep -qx "$tag"; then
+          git push origin "$tag"
+          echo "Synced tag $tag"
+        fi
+      done
+      echo "Sync complete"
+
 prepare-release:
   stage: prepare
   image:
@@ -209,5 +255,8 @@ prepare-release:
       git tag "${TAG}"
       git push origin main
       git push origin "${TAG}"
+      # Cross-push to GitHub
+      git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitHub push (main) failed"
+      git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" "${TAG}" || echo "WARNING: GitHub push (tag) failed"
       # Delete release branch
       git push origin --delete "${CI_COMMIT_BRANCH}" || true

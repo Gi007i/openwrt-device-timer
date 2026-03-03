@@ -208,16 +208,7 @@ msgstr ""
 msgid "Apply Recommended Threshold"
 msgstr ""
 
-msgid "Apply Calibration"
-msgstr ""
-
-msgid "This will update the traffic threshold for this device. Continue?"
-msgstr ""
-
 msgid "Cancel"
-msgstr ""
-
-msgid "Threshold applied: %s"
 msgstr ""
 
 msgid "Recommended Threshold"

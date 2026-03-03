@@ -36,12 +36,6 @@ var callGetCalibration = rpc.declare({
 	params: ['id']
 });
 
-var callApplyCalibration = rpc.declare({
-	object: 'luci.device-timer',
-	method: 'applycalibration',
-	params: ['id']
-});
-
 var callCancelCalibration = rpc.declare({
 	object: 'luci.device-timer',
 	method: 'cancelcalibration',
@@ -63,6 +57,17 @@ function formatBytes(bytes) {
 	} else {
 		return Math.round(bytes / (1024 * 1024)) + ' M';
 	}
+}
+
+// Format bytes to UCI threshold string (e.g., "8K", "1M")
+// Must match formatBytes() logic so displayed recommendation equals applied value
+function formatThresholdUCI(bytes) {
+	if (bytes < 1024 * 1024) {
+		var kb = Math.ceil(bytes / 1024);
+		if (kb < 1) kb = 1;
+		return kb + 'K';
+	}
+	return Math.round(bytes / (1024 * 1024)) + 'M';
 }
 
 // Parse time string "HH:MM" to minutes since midnight
@@ -437,40 +442,34 @@ var CBICalibrationUI = form.DummyValue.extend({
 			}
 		}, actionTitle);
 
-		// Apply button handler
+		// Apply button handler — sets form field directly (standard save & apply workflow)
 		var applyBtn = E('button', {
 			'class': 'btn cbi-button-action', 'id': 'cal-apply-btn',
 			'click': function() {
 				var dev = deviceDataStore[section_id] || {};
 				var calState = (dev.calibration && dev.calibration.status) ? dev.calibration : {};
-				var modalContent = [
-					E('p', {}, _('This will update the traffic threshold for this device. Continue?'))
-				];
-				if (calState.result_overlap) {
-					modalContent.push(E('p', { 'style': 'color:#c00' },
-						_('Idle traffic overlaps with usage traffic — result may be unreliable.')));
+
+				if (!calState.result_recommended || calState.result_recommended <= 0) return;
+
+				var thresholdStr = formatThresholdUCI(calState.result_recommended);
+
+				// Update form field in Advanced tab (form save handles UCI write)
+				var input = document.getElementById(
+					'widget.cbid.device_timer.' + section_id + '.traffic_threshold');
+				if (input) {
+					input.value = thresholdStr;
+					input.dispatchEvent(new Event('change', { bubbles: true }));
+				} else {
+					uci.set('device_timer', section_id, 'traffic_threshold', thresholdStr);
 				}
-				modalContent.push(E('div', { 'class': 'right' }, [
-					E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
-					E('button', { 'class': 'btn cbi-button-action', 'click': function() {
-						calibrationActionTime[section_id] = Date.now();
-						callApplyCalibration(section_id).then(function(result) {
-							ui.hideModal();
-							if (result.success) {
-								ui.addNotification(null, E('p', _('Threshold applied: %s').format(result.threshold)), 'success');
-								if (deviceDataStore[section_id])
-									deviceDataStore[section_id].calibration = { status: 'idle' };
-								updateCalibrationInModal();
-							} else {
-								ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
-							}
-						}).catch(function() {
-							ui.hideModal();
-							ui.addNotification(null, E('p', _('Failed')), 'error');
-						});
-					}}, _('Apply'))
-				]));
-				ui.showModal(_('Apply Calibration'), modalContent);
+
+				// Clear calibration state via backend
+				calibrationActionTime[section_id] = Date.now();
+				callCancelCalibration(section_id).catch(function() {});
+
+				if (deviceDataStore[section_id])
+					deviceDataStore[section_id].calibration = { status: 'idle' };
+				updateCalibrationInModal();
 			}
 		}, _('Apply Recommended Threshold'));
 		var savedDuration = uci.get('device_timer', section_id, 'calibration_duration') || '1800';

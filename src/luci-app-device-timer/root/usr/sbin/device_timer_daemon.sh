@@ -129,10 +129,63 @@ monitor_device() {
         return
     fi
 
-    # If device monitoring is disabled, ensure it's unblocked
+    # If device monitoring is disabled, ensure it's unblocked and cleaned up
     if [ "$device_enabled" != "1" ]; then
         manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "unblock"
+        nft delete table $NFT_TABLE 2>/dev/null || true
+        rm -f "$TEMP_DIR/${device_id}_nft_ip"
         return
+    fi
+
+    # Resolve device IP from MAC (for nftables traffic counting and conntrack flush)
+    local device_ip=$(resolve_device_ip "$device_mac")
+
+    # Validate IP format before using in nft commands (defense-in-depth)
+    if [ -n "$device_ip" ] && ! echo "$device_ip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        log "[$device_id] Warning: Invalid IP format from ARP/DHCP, ignoring"
+        device_ip=""
+    fi
+
+    # Stored IP as fallback (when ARP/DHCP empty but table exists)
+    local stored_nft_ip=""
+    [ -f "$TEMP_DIR/${device_id}_nft_ip" ] && stored_nft_ip=$(cat "$TEMP_DIR/${device_id}_nft_ip")
+    if [ -n "$stored_nft_ip" ] && ! echo "$stored_nft_ip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        stored_nft_ip=""
+    fi
+
+    # Effective IP: current preferred, fallback to stored
+    local nft_ip="${device_ip:-$stored_nft_ip}"
+
+    # IP changed? -> Recreate nft table and flush old conntrack entries
+    if [ -n "$device_ip" ] && [ -n "$stored_nft_ip" ] && [ "$stored_nft_ip" != "$device_ip" ]; then
+        log "[$device_id] IP changed: $stored_nft_ip -> $device_ip, recreating nft table"
+        CONNTRACK_FLUSH_IPS="$CONNTRACK_FLUSH_IPS $stored_nft_ip"
+        nft delete table $NFT_TABLE 2>/dev/null || true
+        nft_ip="$device_ip"
+    fi
+
+    # Create nft table if not exists (use IP for reliable traffic counting)
+    # Table is created for ALL enabled devices to ensure conntrack flush works on block
+    if ! nft list table $NFT_TABLE > /dev/null 2>&1; then
+        if [ -n "$nft_ip" ]; then
+            log "[$device_id] Creating nft table (ip=$nft_ip)"
+            if ! nft add table $NFT_TABLE; then
+                log "[$device_id] Error: Failed to create nft table, blocking device"
+                manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "block"
+                return
+            fi
+            if ! nft add chain $NFT_TABLE forward '{ type filter hook forward priority -10; }' || \
+               ! nft add rule $NFT_TABLE forward ip saddr $nft_ip counter || \
+               ! nft add rule $NFT_TABLE forward ip daddr $nft_ip counter; then
+                log "[$device_id] Error: Failed to create nft rules, blocking device"
+                nft delete table $NFT_TABLE 2>/dev/null || true
+                manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "block"
+                return
+            fi
+            echo "$nft_ip" > "$TEMP_DIR/${device_id}_nft_ip"
+        else
+            log "[$device_id] Cannot resolve IP, skipping traffic monitoring"
+        fi
     fi
 
     # Get active schedule (returns "active|timerange|limit", "no_schedule", or "outside_window")
@@ -180,58 +233,9 @@ monitor_device() {
     local window_id="${current_day},${active_timerange}"
     local stored_window=$(get_cached_window "$device_id")
 
-    # Resolve device IP from MAC (for nftables traffic counting)
-    local device_ip=$(resolve_device_ip "$device_mac")
-
-    # Validate IP format before using in nft commands (defense-in-depth)
-    if [ -n "$device_ip" ] && ! echo "$device_ip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
-        log "[$device_id] Warning: Invalid IP format from ARP/DHCP, ignoring"
-        device_ip=""
-    fi
-
-    # Stored IP as fallback (when ARP/DHCP empty but table exists)
-    local stored_nft_ip=""
-    [ -f "$TEMP_DIR/${device_id}_nft_ip" ] && stored_nft_ip=$(cat "$TEMP_DIR/${device_id}_nft_ip")
-    if [ -n "$stored_nft_ip" ] && ! echo "$stored_nft_ip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
-        stored_nft_ip=""
-    fi
-
-    # Effective IP: current preferred, fallback to stored
-    local nft_ip="${device_ip:-$stored_nft_ip}"
-
-    # Process calibration (only with IP available)
+    # Process calibration (only with IP available and active schedule)
     if [ -n "$nft_ip" ]; then
         process_calibration "$device_id" "$nft_ip" "$current_time"
-    fi
-
-    # IP changed? -> Recreate nft table
-    if [ -n "$device_ip" ] && [ -n "$stored_nft_ip" ] && [ "$stored_nft_ip" != "$device_ip" ]; then
-        log "[$device_id] IP changed: $stored_nft_ip -> $device_ip, recreating nft table"
-        nft delete table $NFT_TABLE 2>/dev/null || true
-        nft_ip="$device_ip"
-    fi
-
-    # Create nft table if not exists (use IP for reliable traffic counting)
-    if ! nft list table $NFT_TABLE > /dev/null 2>&1; then
-        if [ -n "$nft_ip" ]; then
-            log "[$device_id] Creating nft table (ip=$nft_ip)"
-            if ! nft add table $NFT_TABLE; then
-                log "[$device_id] Error: Failed to create nft table, blocking device"
-                manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "block"
-                return
-            fi
-            if ! nft add chain $NFT_TABLE forward '{ type filter hook forward priority 0; }' || \
-               ! nft add rule $NFT_TABLE forward ip saddr $nft_ip counter || \
-               ! nft add rule $NFT_TABLE forward ip daddr $nft_ip counter; then
-                log "[$device_id] Error: Failed to create nft rules, blocking device"
-                nft delete table $NFT_TABLE 2>/dev/null || true
-                manage_firewall_rule "$device_id" "$device_mac" "$FIREWALL_RULE_NAME" "block"
-                return
-            fi
-            echo "$nft_ip" > "$TEMP_DIR/${device_id}_nft_ip"
-        else
-            log "[$device_id] Cannot resolve IP, skipping traffic monitoring"
-        fi
     fi
 
     # Read counters (with IP-based matching)
@@ -416,6 +420,9 @@ main() {
             fi
             FIREWALL_NEEDS_RELOAD=0
             # Kill established connections for newly blocked devices
+            flush_conntrack_ips
+        elif [ -n "$CONNTRACK_FLUSH_IPS" ]; then
+            # Flush remaining entries (e.g., from IP changes without firewall rule changes)
             flush_conntrack_ips
         fi
 

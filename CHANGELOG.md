@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.0] - 2026-03-03
+
+### Fixed
+- Fix blocked devices retaining internet access through established TCP connections
+- Fix conntrack flush unavailable for devices without active schedule (no_schedule, outside_window)
+- Fix stale conntrack entries persisting after device IP change (DHCP renewal)
+- Fix conntrack flush queue not drained when no firewall reload occurred
+- Fix calibration threshold apply bypassing standard save & apply workflow
+- Fix calibration success notification hidden behind edit modal
+
+### Changed
+- Use nft chain priority -10 instead of 0 to ensure traffic counting before firewall4 evaluation
+- Create nft monitoring tables for all enabled devices regardless of schedule state
+
 ## [1.2.1] - 2026-02-28
 
 ### Fixed
