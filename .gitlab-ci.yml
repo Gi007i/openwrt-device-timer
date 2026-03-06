@@ -195,8 +195,8 @@ sync:
       git fetch origin main --tags
       git fetch github main --tags || { echo "WARNING: GitHub unreachable"; exit 0; }
 
-      # Fast-forward main if behind
-      git checkout main
+      # Fast-forward main if behind (explicit origin to avoid ambiguity with github/main)
+      git checkout -b main origin/main
       if git merge-base --is-ancestor HEAD github/main 2>/dev/null; then
         if [ "$(git rev-parse HEAD)" != "$(git rev-parse github/main)" ]; then
           git merge --ff-only github/main
