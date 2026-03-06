@@ -1,5 +1,5 @@
 Package: luci-app-device-timer
-Version: 1.3.3-r1
+Version: 1.3.4-r1
 Depends: libc, luci-base, rpcd, rpcd-mod-ucode
 Source: feeds/base/luci-app-device-timer
 SourceName: luci-app-device-timer
@@ -11,13 +11,13 @@ URL: https://github.com/openwrt/luci
 Maintainer: Gi007i <gi034@h7.biz>
 Architecture: all
 Installed-Size: 153600
-Filename: luci-app-device-timer_1.3.3-r1_all.ipk
+Filename: luci-app-device-timer_1.3.4-r1_all.ipk
 Size: 30481
-SHA256sum: 54b4f611d1909e62cfb7f9396abb97101b983a3a29d3c2aa8ee0b93e5a668275
+SHA256sum: 13e782b38c5c46321dd797dbea42e6bcc29898537a992138a74177bcbd8ed19a
 Description:  Usage time management for monitoring and limiting device usage
 
 Package: luci-i18n-device-timer-de
-Version: 1.3.3-1
+Version: 1.3.4-1
 Depends: libc, luci-app-device-timer
 Source: feeds/base/luci-app-device-timer
 SourceName: luci-app-device-timer
@@ -27,8 +27,8 @@ Section: luci
 SourceDateEpoch: 1738624177
 Architecture: all
 Installed-Size: 20480
-Filename: luci-i18n-device-timer-de_1.3.3-1_all.ipk
-Size: 3200
-SHA256sum: caa566cde60a6f7cbba01b52c94d92f33e1625f292b499584846aa61a0631e3c
+Filename: luci-i18n-device-timer-de_1.3.4-1_all.ipk
+Size: 3198
+SHA256sum: 45dc6a451c45d6e7fef3e5d03e1c238a8b5e28887ae655aebb6837728054387a
 Description:  Translation for luci-app-device-timer - Deutsch (German)
 
