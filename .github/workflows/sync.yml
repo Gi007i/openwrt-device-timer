@@ -40,12 +40,11 @@ jobs:
             exit 1
           fi
 
-          # Push missing tags
+          # Push missing tags (non-fatal: individual failures must not abort sync)
           ORIGIN_TAGS=$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' || true)
           for tag in $(git tag -l 'v*'); do
             if ! echo "$ORIGIN_TAGS" | grep -qx "$tag"; then
-              git push origin "$tag"
-              echo "Synced tag $tag"
+              git push origin "$tag" && echo "Synced tag $tag" || echo "WARNING: Failed to push tag $tag"
             fi
           done
           echo "Sync complete"
