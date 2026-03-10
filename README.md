@@ -26,18 +26,26 @@ The package is available from two mirrors:
 
 | Mirror | Feed URL |
 |---|---|
-| GitHub | `https://Gi007i.github.io/openwrt-device-timer/packages` |
-| GitLab | `https://Gi007i.gitlab.io/openwrt-device-timer/packages` |
+| GitHub | `https://Gi007i.github.io/openwrt-device-timer/packages/packages.adb` |
+| GitLab | `https://Gi007i.gitlab.io/openwrt-device-timer/packages/packages.adb` |
 
 ### Via LuCI Web Interface
 
 1. In LuCI go to **System → Software**
 2. Under **Download and install package**, paste one of these URLs and click **OK**:
-   - `https://Gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer-1.4.0-r1.apk`
-   - `https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-app-device-timer-1.4.0-r1.apk`
+   ```
+   https://Gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer-1.4.1-r1.apk
+   ```
+   ```
+   https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-app-device-timer-1.4.1-r1.apk
+   ```
 3. Repeat for the German translation:
-   - `https://Gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.4.0-r1.apk`
-   - `https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.4.0-r1.apk`
+   ```
+   https://Gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.4.1-r1.apk
+   ```
+   ```
+   https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.4.1-r1.apk
+   ```
 
 This installs the package, the feed signing key and registers the package feed automatically. Future updates are available through **System → Software → Updates**.
 
@@ -48,13 +56,13 @@ Choose one mirror and run:
 ```sh
 # GitHub mirror
 wget -O /etc/apk/keys/device-timer.pem https://Gi007i.github.io/openwrt-device-timer/keys/device-timer.pem
-echo 'https://Gi007i.github.io/openwrt-device-timer/packages' > /etc/apk/repositories.d/device-timer.list
+echo 'https://Gi007i.github.io/openwrt-device-timer/packages/packages.adb' > /etc/apk/repositories.d/device-timer.list
 ```
 
 ```sh
 # GitLab mirror
 wget -O /etc/apk/keys/device-timer.pem https://Gi007i.gitlab.io/openwrt-device-timer/keys/device-timer.pem
-echo 'https://Gi007i.gitlab.io/openwrt-device-timer/packages' > /etc/apk/repositories.d/device-timer.list
+echo 'https://Gi007i.gitlab.io/openwrt-device-timer/packages/packages.adb' > /etc/apk/repositories.d/device-timer.list
 ```
 
 ```sh

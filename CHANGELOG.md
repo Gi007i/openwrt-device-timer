@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.1] - 2026-03-10
+
+### Fixed
+- Fix package feed URL missing `/packages.adb` suffix (apk could not find package index)
+- Fix permission denied errors during post-install by setting executable file modes in package
+
 ## [1.4.0] - 2026-03-10
 
 ### Changed

@@ -1,6 +1,6 @@
 include $(TOPDIR)/rules.mk
 
-PKG_VERSION:=1.4.0
+PKG_VERSION:=1.4.1
 PKG_RELEASE:=1
 DO_RELEASE:=1
 PKG_PO_VERSION:=$(PKG_VERSION)-r$(PKG_RELEASE)
@@ -22,18 +22,12 @@ endef
 define Package/luci-app-device-timer/postinst
 #!/bin/sh
 if [ -z "$${IPKG_INSTROOT}" ]; then
-	# Set executable permissions for scripts
-	chmod +x /etc/init.d/device_timer 2>/dev/null
-	chmod +x /usr/sbin/device_timer_daemon.sh 2>/dev/null
-	chmod +x /usr/sbin/device_timer_validate 2>/dev/null
-	chmod +x /lib/device_timer/*.sh 2>/dev/null
-
 	# LuCI cache and rpcd (luci.mk default is skipped when custom postinst defined)
 	rm -rf /tmp/luci-modulecache/ 2>/dev/null
 	/etc/init.d/rpcd reload 2>/dev/null
 
 	# Register package feed for updates and metadata
-	echo "__PAGES_URL__/packages" > /etc/apk/repositories.d/device-timer.list
+	echo "__PAGES_URL__/packages/packages.adb" > /etc/apk/repositories.d/device-timer.list
 	apk update 2>/dev/null
 
 	# Note: enable/start and luci-indexcache handled by default_postinst
