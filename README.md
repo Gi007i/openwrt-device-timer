@@ -1,6 +1,6 @@
 # OpenWRT Device Timer
 
-![OpenWRT](https://img.shields.io/badge/OpenWRT-24.10-00B5E2?style=flat-square&logo=openwrt&logoColor=white)
+![OpenWRT](https://img.shields.io/badge/OpenWRT-25.12-00B5E2?style=flat-square&logo=openwrt&logoColor=white)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 ![Shell](https://img.shields.io/badge/shell-POSIX%20sh-4EAA25?style=flat-square&logo=gnu-bash&logoColor=white)
 
@@ -8,7 +8,7 @@ LuCI app for monitoring and limiting the usage time of network devices. Automati
 
 ## System Requirements
 
-- OpenWRT 24.10 or higher
+- OpenWRT 25.12 or higher
 
 ## Features
 
@@ -33,11 +33,11 @@ The package is available from two mirrors:
 
 1. In LuCI go to **System → Software**
 2. Under **Download and install package**, paste one of these URLs and click **OK**:
-   - `https://Gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer_1.3.2-r1_all.ipk`
-   - `https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-app-device-timer_1.3.2-r1_all.ipk`
+   - `https://Gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer-1.4.0-r1.apk`
+   - `https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-app-device-timer-1.4.0-r1.apk`
 3. Repeat for the German translation:
-   - `https://Gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de_1.3.2-1_all.ipk`
-   - `https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-i18n-device-timer-de_1.3.2-1_all.ipk`
+   - `https://Gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.4.0-r1.apk`
+   - `https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.4.0-r1.apk`
 
 This installs the package, the feed signing key and registers the package feed automatically. Future updates are available through **System → Software → Updates**.
 
@@ -47,22 +47,22 @@ Choose one mirror and run:
 
 ```sh
 # GitHub mirror
-wget -O /etc/opkg/keys/608ca90e3cad75e0 https://Gi007i.github.io/openwrt-device-timer/keys/608ca90e3cad75e0
-echo 'src/gz device_timer https://Gi007i.github.io/openwrt-device-timer/packages' >> /etc/opkg/customfeeds.conf
+wget -O /etc/apk/keys/device-timer.pem https://Gi007i.github.io/openwrt-device-timer/keys/device-timer.pem
+echo 'https://Gi007i.github.io/openwrt-device-timer/packages' > /etc/apk/repositories.d/device-timer.list
 ```
 
 ```sh
 # GitLab mirror
-wget -O /etc/opkg/keys/608ca90e3cad75e0 https://Gi007i.gitlab.io/openwrt-device-timer/keys/608ca90e3cad75e0
-echo 'src/gz device_timer https://Gi007i.gitlab.io/openwrt-device-timer/packages' >> /etc/opkg/customfeeds.conf
+wget -O /etc/apk/keys/device-timer.pem https://Gi007i.gitlab.io/openwrt-device-timer/keys/device-timer.pem
+echo 'https://Gi007i.gitlab.io/openwrt-device-timer/packages' > /etc/apk/repositories.d/device-timer.list
 ```
 
 ```sh
-opkg update
-opkg install luci-app-device-timer luci-i18n-device-timer-de
+apk update
+apk add luci-app-device-timer luci-i18n-device-timer-de
 ```
 
-Future updates are available through `opkg upgrade`.
+Future updates are available through `apk upgrade`.
 
 ## Configuration
 
@@ -93,7 +93,7 @@ The device timer exposes a ubus JSON-RPC interface for programmatic access.
 ## Uninstall
 
 ```sh
-opkg remove luci-app-device-timer luci-i18n-device-timer-de
+apk del luci-app-device-timer luci-i18n-device-timer-de
 ```
 
 Configuration files are preserved and can be removed manually:

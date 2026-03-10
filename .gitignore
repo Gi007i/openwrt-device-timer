@@ -17,5 +17,4 @@ desktop.ini
 # Environment / Secrets
 .env
 .env.*
-*.pem
 *.key

@@ -1,4 +1,4 @@
-name: Build IPK and Release
+name: Build APK and Release
 
 on:
   push:
@@ -10,9 +10,9 @@ permissions:
   contents: write
 
 env:
-  SDK_VERSION: "24.10.0"
+  SDK_VERSION: "25.12.0"
   SDK_TARGET: "bcm27xx-bcm2711"
-  SDK_URL: "https://downloads.openwrt.org/releases/24.10.0/targets/bcm27xx/bcm2711/openwrt-sdk-24.10.0-bcm27xx-bcm2711_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+  SDK_URL: "https://downloads.openwrt.org/releases/25.12.0/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.0-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
   PACKAGE_NAME: "luci-app-device-timer"
   PAGES_URL: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
@@ -89,18 +89,41 @@ jobs:
           cd ~/openwrt-sdk
           make package/$PACKAGE_NAME/compile V=s
 
-      - name: Collect IPK artifacts
+      - name: Collect APK artifacts
         run: |
-          mkdir -p artifacts
-          find ~/openwrt-sdk/bin/packages/ -name "*device-timer*.ipk" -exec cp {} artifacts/ \;
+          mkdir -p artifacts/keys
+          find ~/openwrt-sdk/bin/packages/ -name "*device-timer*.apk" -exec cp {} artifacts/ \;
+          # Include public signing key for feed deployment
+          KEY_DIR="src/$PACKAGE_NAME/root/etc/apk/keys"
+          if [ -d "$KEY_DIR" ]; then
+            cp "$KEY_DIR"/* artifacts/keys/ 2>/dev/null || true
+          fi
           echo "Built packages:"
           ls -lh artifacts/
+
+      - name: Generate signed package index
+        env:
+          APK_SIGNING_KEY: ${{ secrets.APK_SIGNING_KEY }}
+        run: |
+          APK="$HOME/openwrt-sdk/staging_dir/host/bin/apk"
+          cd artifacts
+          if [ -n "$APK_SIGNING_KEY" ]; then
+            printf '%s\n' "$APK_SIGNING_KEY" > /tmp/apk-key.pem
+            chmod 600 /tmp/apk-key.pem
+            $APK mkndx --allow-untrusted --sign /tmp/apk-key.pem -o packages.adb *.apk
+            rm -f /tmp/apk-key.pem
+            echo "--- Signed package index generated ---"
+          else
+            echo "WARNING: APK_SIGNING_KEY not set, creating unsigned index"
+            $APK mkndx --allow-untrusted -o packages.adb *.apk
+          fi
+          ls -lh packages.adb
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ipk-packages
-          path: artifacts/*.ipk
+          name: apk-packages
+          path: artifacts/
           retention-days: 30
 
   release:
@@ -144,15 +167,8 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ipk-packages
+          name: apk-packages
           path: artifacts
-
-      - name: Cache OpenWRT SDK (for index generator)
-        uses: actions/cache@v4
-        id: sdk-cache
-        with:
-          path: ~/openwrt-sdk
-          key: openwrt-sdk-${{ env.SDK_VERSION }}-${{ env.SDK_TARGET }}-v3
 
       - name: Generate index.html redirect
         run: |
@@ -165,75 +181,20 @@ jobs:
           </html>
           EOF
 
-      - name: Update packages and generate index
+      - name: Update packages
         run: |
-          mkdir -p packages
-          rm -f packages/*device-timer*.ipk
-          cp artifacts/*.ipk packages/
+          mkdir -p packages keys
+          rm -f packages/*device-timer*.apk packages/packages.adb
+          cp artifacts/*.apk packages/
+          cp artifacts/packages.adb packages/
+          cp artifacts/keys/* keys/ 2>/dev/null || true
           echo "Updated packages:"
           ls -lh packages/
-
-          cd packages
-
-          # ipkg-make-index.sh requires mkhash via $MKHASH env var
-          export PATH="$HOME/openwrt-sdk/staging_dir/host/bin:$PATH"
-          if ! command -v mkhash >/dev/null 2>&1; then
-            mkdir -p /tmp/bin
-            printf '#!/bin/bash\ncase "$1" in\n  sha256) sha256sum | cut -d" " -f1 ;;\n  md5) md5sum | cut -d" " -f1 ;;\nesac\n' > /tmp/bin/mkhash
-            chmod +x /tmp/bin/mkhash
-            export PATH="/tmp/bin:$PATH"
-          fi
-          export MKHASH=mkhash
-
-          if [ -x ~/openwrt-sdk/scripts/ipkg-make-index.sh ]; then
-            ~/openwrt-sdk/scripts/ipkg-make-index.sh . > Packages
-          else
-            echo "ERROR: ipkg-make-index.sh not found in SDK cache"
-            exit 1
-          fi
-
-          gzip -k -f Packages
-          echo "--- Generated Packages index ---"
-          cat Packages
-
-      - name: Sign package index
-        env:
-          USIGN_KEY: ${{ secrets.USIGN_KEY }}
-        run: |
-          cd packages
-
-          if [ -z "$USIGN_KEY" ]; then
-            echo "WARNING: USIGN_KEY secret not set, skipping signing"
-            exit 0
-          fi
-
-          # Write signing key to temp file
-          printf '%s\n' "$USIGN_KEY" > /tmp/feed-key.sec
-          chmod 600 /tmp/feed-key.sec
-
-          # Try usign from SDK, fall back to signify-openbsd
-          USIGN="$HOME/openwrt-sdk/staging_dir/host/bin/usign"
-          if [ -x "$USIGN" ]; then
-            echo "Signing with usign from SDK"
-            $USIGN -S -m Packages -s /tmp/feed-key.sec
-          elif command -v signify-openbsd >/dev/null 2>&1; then
-            echo "Signing with signify-openbsd (fallback)"
-            signify-openbsd -S -m Packages -s /tmp/feed-key.sec
-          else
-            echo "Installing signify-openbsd as fallback..."
-            sudo apt-get install -y signify-openbsd
-            signify-openbsd -S -m Packages -s /tmp/feed-key.sec
-          fi
-
-          rm -f /tmp/feed-key.sec
-
-          echo "--- Packages.sig ---"
-          cat Packages.sig
 
       - name: Commit and push to gh-pages
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/ index.html
+          git add packages/ keys/ index.html
           git commit -m "update feed: ${{ github.ref_name }}" || echo "No changes to commit"
           git push

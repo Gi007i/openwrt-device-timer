@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0] - 2026-03-10
+
+### Changed
+- Migrate to OpenWRT 25.12 with APK package manager (replaces opkg/IPK)
+- Build with OpenWRT SDK 25.12.0 (GCC 14.3.0)
+- Use ECDSA P-256 feed signing (replaces Ed25519/usign)
+
 ## [1.3.2] - 2026-03-03
 
 ### Changed

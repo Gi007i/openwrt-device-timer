@@ -1,5 +1,5 @@
-# GitLab CI/CD pipeline for building OpenWRT IPK packages
-# Equivalent to .github/workflows/build-ipk.yml
+# GitLab CI/CD pipeline for building OpenWRT APK packages
+# Equivalent to .github/workflows/build-apk.yml
 
 workflow:
   rules:
@@ -16,9 +16,9 @@ stages:
   - pages
 
 variables:
-  SDK_VERSION: "24.10.0"
+  SDK_VERSION: "25.12.0"
   SDK_TARGET: "bcm27xx-bcm2711"
-  SDK_URL: "https://downloads.openwrt.org/releases/24.10.0/targets/bcm27xx/bcm2711/openwrt-sdk-24.10.0-bcm27xx-bcm2711_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+  SDK_URL: "https://downloads.openwrt.org/releases/25.12.0/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.0-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
   PACKAGE_NAME: "luci-app-device-timer"
 
 build:
@@ -79,9 +79,24 @@ build:
       cd ..
     - |
       mkdir -p artifacts
-      find openwrt-sdk/bin/packages/ -name "*device-timer*.ipk" -exec cp {} artifacts/ \;
+      find openwrt-sdk/bin/packages/ -name "*device-timer*.apk" -exec cp {} artifacts/ \;
       echo "Built packages:"
       ls -lh artifacts/
+    # Generate signed package index
+    - |
+      APK="openwrt-sdk/staging_dir/host/bin/apk"
+      cd artifacts
+      if [ -n "$APK_SIGNING_KEY" ]; then
+        printf '%s\n' "$APK_SIGNING_KEY" > /tmp/apk-key.pem
+        chmod 600 /tmp/apk-key.pem
+        ../$APK mkndx --allow-untrusted --sign /tmp/apk-key.pem -o packages.adb *.apk
+        rm -f /tmp/apk-key.pem
+        echo "--- Signed package index generated ---"
+      else
+        echo "WARNING: APK_SIGNING_KEY not set, creating unsigned index"
+        ../$APK mkndx --allow-untrusted -o packages.adb *.apk
+      fi
+      ls -lh packages.adb
   artifacts:
     paths:
       - artifacts/
@@ -117,8 +132,6 @@ pages:
   needs:
     - job: build
       artifacts: true
-  before_script:
-    - apt-get update && apt-get install -y signify-openbsd zstd
   script:
     - mkdir -p public/packages public/keys
     - |
@@ -129,47 +142,13 @@ pages:
       <body></body>
       </html>
       HTMLEOF
-    - cp artifacts/*.ipk public/packages/
+    - cp artifacts/*.apk public/packages/
+    - cp artifacts/packages.adb public/packages/
     # Copy public signing key
     - |
-      KEY_DIR="src/${PACKAGE_NAME}/root/etc/opkg/keys"
+      KEY_DIR="src/${PACKAGE_NAME}/root/etc/apk/keys"
       if [ -d "$KEY_DIR" ]; then
         cp "$KEY_DIR"/* public/keys/
-      fi
-    # Generate Packages index from IPK control metadata
-    # OpenWRT IPK files are tar.gz archives (not ar/deb format)
-    - |
-      cd public/packages
-      for ipk in *.ipk; do
-        [ -f "$ipk" ] || continue
-        mkdir -p _tmp && cd _tmp
-        tar xzf "../$ipk" 2>/dev/null || true
-        if [ -f control.tar.gz ]; then
-          tar xzf control.tar.gz 2>/dev/null || true
-        elif [ -f control.tar.zst ]; then
-          tar --zstd -xf control.tar.zst 2>/dev/null || true
-        fi
-        if [ -f ./control ]; then
-          cat ./control
-          echo "Filename: $ipk"
-          echo "Size: $(stat -c %s "../$ipk")"
-          echo "SHA256sum: $(sha256sum "../$ipk" | cut -d' ' -f1)"
-          echo ""
-        fi
-        cd .. && rm -rf _tmp
-      done > Packages
-      gzip -k -f Packages
-      cd ../..
-    # Sign package index
-    - |
-      if [ -n "$USIGN_KEY" ]; then
-        cd public/packages
-        printf '%s\n' "$USIGN_KEY" > /tmp/feed-key.sec
-        chmod 600 /tmp/feed-key.sec
-        signify-openbsd -S -m Packages -s /tmp/feed-key.sec
-        rm -f /tmp/feed-key.sec
-      else
-        echo "WARNING: USIGN_KEY not set, skipping signing"
       fi
   artifacts:
     paths:
@@ -251,14 +230,23 @@ prepare-release:
       sed -i "s|__VERSION__|${VERSION}|g" README.md
       # Set PKG_VERSION in Makefile
       sed -i "s|^PKG_VERSION:=.*|PKG_VERSION:=${VERSION}|" src/luci-app-device-timer/Makefile
-      # Commit, tag, push
+      # Check DO_RELEASE flag
+      DO_RELEASE=$(grep '^DO_RELEASE:=' src/luci-app-device-timer/Makefile | cut -d= -f2)
       git add -A
-      git commit -m "feat: release v${VERSION} device timer package"
-      git tag "${TAG}"
-      git push origin main
-      git push origin "${TAG}"
-      # Cross-push to GitHub
-      git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitHub push (main) failed"
-      git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" "${TAG}" || echo "WARNING: GitHub push (tag) failed"
+      if [ "${DO_RELEASE}" = "1" ]; then
+        # Full release: commit, tag, push
+        git commit -m "feat: release v${VERSION} device timer package"
+        git tag "${TAG}"
+        git push origin main
+        git push origin "${TAG}"
+        # Cross-push to GitHub
+        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitHub push (main) failed"
+        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" "${TAG}" || echo "WARNING: GitHub push (tag) failed"
+      else
+        # Merge only: no tag, no build
+        git commit -m "feat: release v${VERSION} device timer package"
+        git push origin main
+        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitHub push (main) failed"
+      fi
       # Delete release branch
       git push origin --delete "${CI_COMMIT_BRANCH}" || true

@@ -42,14 +42,23 @@ jobs:
           sed -i "s|__VERSION__|${VERSION}|g" README.md
           # Set PKG_VERSION in Makefile
           sed -i "s|^PKG_VERSION:=.*|PKG_VERSION:=${VERSION}|" src/luci-app-device-timer/Makefile
-          # Commit, tag, push
+          # Check DO_RELEASE flag
+          DO_RELEASE=$(grep '^DO_RELEASE:=' src/luci-app-device-timer/Makefile | cut -d= -f2)
           git add -A
-          git commit -m "feat: release v${VERSION} device timer package"
-          git tag "v${VERSION}"
-          git push origin main
-          git push origin "v${VERSION}"
-          # Cross-push to GitLab
-          git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitLab push (main) failed"
-          git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" "v${VERSION}" || echo "WARNING: GitLab push (tag) failed"
+          if [ "${DO_RELEASE}" = "1" ]; then
+            # Full release: commit, tag, push
+            git commit -m "feat: release v${VERSION} device timer package"
+            git tag "v${VERSION}"
+            git push origin main
+            git push origin "v${VERSION}"
+            # Cross-push to GitLab
+            git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitLab push (main) failed"
+            git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" "v${VERSION}" || echo "WARNING: GitLab push (tag) failed"
+          else
+            # Merge only: no tag, no build
+            git commit -m "feat: release v${VERSION} device timer package"
+            git push origin main
+            git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitLab push (main) failed"
+          fi
           # Delete release branch
           git push origin --delete "${GITHUB_REF_NAME}" || true

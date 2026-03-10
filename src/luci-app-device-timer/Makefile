@@ -1,8 +1,9 @@
 include $(TOPDIR)/rules.mk
 
-PKG_VERSION:=1.3.4
+PKG_VERSION:=1.4.0
 PKG_RELEASE:=1
-PKG_PO_VERSION:=$(PKG_VERSION)-$(PKG_RELEASE)
+DO_RELEASE:=1
+PKG_PO_VERSION:=$(PKG_VERSION)-r$(PKG_RELEASE)
 
 LUCI_TITLE:=LuCI support for Device Timer
 LUCI_DESCRIPTION:=Usage time management for monitoring and limiting device usage
@@ -32,10 +33,8 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	/etc/init.d/rpcd reload 2>/dev/null
 
 	# Register package feed for updates and metadata
-	FEED_LINE="src/gz device_timer __PAGES_URL__/packages"
-	sed -i '/device_timer/d' /etc/opkg/customfeeds.conf 2>/dev/null
-	echo "$$FEED_LINE" >> /etc/opkg/customfeeds.conf
-	opkg update 2>/dev/null
+	echo "__PAGES_URL__/packages" > /etc/apk/repositories.d/device-timer.list
+	apk update 2>/dev/null
 
 	# Note: enable/start and luci-indexcache handled by default_postinst
 fi
@@ -69,7 +68,7 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	rm -rf /tmp/device_timer
 
 	# Remove package feed
-	sed -i '/device_timer/d' /etc/opkg/customfeeds.conf 2>/dev/null
+	rm -f /etc/apk/repositories.d/device-timer.list
 fi
 exit 0
 endef
