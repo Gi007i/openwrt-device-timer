@@ -8,718 +8,668 @@ const calibration = call(loadfile('/usr/share/ucode/device_timer/calibration.uc'
 
 const TEMP_DIR = '/tmp/device_timer';
 
-// Shell escape for safe command execution (prevents injection)
 function shellquote(s) {
-    if (s == null) s = '';
-    return "'" + replace(s, "'", "'\\''") + "'";
+	if (s == null) s = '';
+	return "'" + replace(s, "'", "'\\''") + "'";
 }
 
-// Validate device ID (UCI section names: alphanumeric + underscore only)
 function isValidId(id) {
-    return id && match(id, /^[a-zA-Z0-9_]+$/);
+	return id && match(id, /^[a-zA-Z0-9_]+$/);
 }
 
-// Get current local time (uses /etc/TZ via musl localtime)
-// Returns: { wday: 0-6, hour: 0-23, min: 0-59 }
 function getLocalTime() {
-    const now = localtime(time());
-    return { wday: now.wday, hour: now.hour, min: now.min };
+	const now = localtime(time());
+	return { wday: now.wday, hour: now.hour, min: now.min };
 }
 
-// Get active schedule for today
-// Returns: { status: 'active'|'no_schedule'|'outside_window', timerange: string|null, limit: int|null }
-// Format: "Mon,14:00-18:00,60" (Day,TimeRange,Limit)
 function getActiveSchedule(scheduleList) {
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const now = getLocalTime();
-    const today = days[now.wday % 7];
+	const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+	const now = getLocalTime();
+	const today = days[now.wday % 7];
 
-    if (!scheduleList || !length(scheduleList)) {
-        return { status: 'no_schedule', timerange: null, limit: null };
-    }
+	if (!scheduleList || !length(scheduleList)) {
+		return { status: 'no_schedule', timerange: null, limit: null };
+	}
 
-    // Collect all schedules for today
-    let todaysSchedules = [];
-    for (let i = 0; i < length(scheduleList); i++) {
-        let entry = scheduleList[i];
-        const parts = split(entry, ',');
-        // Format: "Mon,14:00-18:00,60" (all 3 parts required)
-        if (length(parts) === 3 && parts[0] === today) {
-            // Validate limit is numeric (0 = unlimited, 1+ = limit in minutes)
-            if (!match(parts[2], /^(0|[1-9][0-9]*)$/)) {
-                continue; // Skip invalid schedule entries
-            }
-            push(todaysSchedules, {
-                timerange: parts[1],
-                limit: int(parts[2])
-            });
-        }
-    }
+	let todaysSchedules = [];
+	for (let i = 0; i < length(scheduleList); i++) {
+		let entry = scheduleList[i];
+		const parts = split(entry, ',');
+		if (length(parts) === 3 && parts[0] === today) {
+			if (!match(parts[2], /^(0|[1-9][0-9]*)$/)) {
+				continue;
+			}
+			push(todaysSchedules, {
+				timerange: parts[1],
+				limit: int(parts[2])
+			});
+		}
+	}
 
-    if (!length(todaysSchedules)) {
-        return { status: 'no_schedule', timerange: null, limit: null };
-    }
+	if (!length(todaysSchedules)) {
+		return { status: 'no_schedule', timerange: null, limit: null };
+	}
 
-    // Find the active time window (inline to avoid rpcd function call issues)
-    for (let i = 0; i < length(todaysSchedules); i++) {
-        let schedule = todaysSchedules[i];
-        let tr = schedule.timerange;
+	// Inline to avoid rpcd crash with function calls in loops
+	for (let i = 0; i < length(todaysSchedules); i++) {
+		let schedule = todaysSchedules[i];
+		let tr = schedule.timerange;
 
-        // Check if current time is within window
-        let inWindow = false;
-        if (tr) {
-            let currentMinutes = now.hour * 60 + now.min;
+		let inWindow = false;
+		if (tr) {
+			let currentMinutes = now.hour * 60 + now.min;
 
-            let rangeParts = split(tr, '-');
-            if (length(rangeParts) == 2) {
-                let startParts = split(rangeParts[0], ':');
-                let endParts = split(rangeParts[1], ':');
+			let rangeParts = split(tr, '-');
+			if (length(rangeParts) == 2) {
+				let startParts = split(rangeParts[0], ':');
+				let endParts = split(rangeParts[1], ':');
 
-                if (length(startParts) == 2 && length(endParts) == 2) {
-                    let startMinutes = int(startParts[0]) * 60 + int(startParts[1]);
-                    let endMinutes = int(endParts[0]) * 60 + int(endParts[1]);
+				if (length(startParts) == 2 && length(endParts) == 2) {
+					let startMinutes = int(startParts[0]) * 60 + int(startParts[1]);
+					let endMinutes = int(endParts[0]) * 60 + int(endParts[1]);
 
-                    if (startMinutes <= endMinutes) {
-                        // Normal case: e.g., 14:00-18:00
-                        inWindow = (currentMinutes >= startMinutes && currentMinutes < endMinutes);
-                    } else {
-                        // Overnight case: e.g., 22:00-06:00
-                        inWindow = (currentMinutes >= startMinutes || currentMinutes < endMinutes);
-                    }
-                }
-            }
-        }
+					if (startMinutes <= endMinutes) {
+						inWindow = (currentMinutes >= startMinutes && currentMinutes < endMinutes);
+					} else {
+						inWindow = (currentMinutes >= startMinutes || currentMinutes < endMinutes);
+					}
+				}
+			}
+		}
 
-        if (inWindow) {
-            return {
-                status: 'active',
-                timerange: tr,
-                limit: schedule.limit
-            };
-        }
-    }
+		if (inWindow) {
+			return {
+				status: 'active',
+				timerange: tr,
+				limit: schedule.limit
+			};
+		}
+	}
 
-    // Today has schedules, but none is currently active
-    return { status: 'outside_window', timerange: null, limit: null };
+	return { status: 'outside_window', timerange: null, limit: null };
 }
 
-// Resolve IP address from MAC via ARP table or DHCP leases
 function resolveIpFromMac(mac) {
-    if (!mac) return null;
+	if (!mac) return null;
 
-    // Normalize MAC to lowercase for comparison
-    const macLower = lc(mac);
+	const macLower = lc(mac);
 
-    // Try ARP table first (/proc/net/arp — same source as daemon)
-    const arpFile = open('/proc/net/arp', 'r');
-    if (arpFile) {
-        let line;
-        // Skip header line
-        arpFile.read('line');
-        while ((line = arpFile.read('line')) !== null) {
-            // Format: "IP  HWtype  Flags  HWaddress  Mask  Device"
-            const m = match(trim(line), /^(\S+)\s+\S+\s+\S+\s+(\S+)/);
-            if (m && lc(m[2]) === macLower) {
-                arpFile.close();
-                return m[1];
-            }
-        }
-        arpFile.close();
-    }
+	const arpFile = open('/proc/net/arp', 'r');
+	if (arpFile) {
+		let line;
+		arpFile.read('line');
+		while ((line = arpFile.read('line')) !== null) {
+			// Format: "IP  HWtype  Flags  HWaddress  Mask  Device"
+			const m = match(trim(line), /^(\S+)\s+\S+\s+\S+\s+(\S+)/);
+			if (m && lc(m[2]) === macLower) {
+				arpFile.close();
+				return m[1];
+			}
+		}
+		arpFile.close();
+	}
 
-    // Fallback to DHCP leases
-    const uci = cursor();
-    let leasefile = uci.get('dhcp', '@dnsmasq[0]', 'leasefile');
-    // Fallback: read from generated dnsmasq config
-    if (!leasefile || !access(leasefile, 'r')) {
-        const dnsmasqConf = popen("grep -sh 'dhcp-leasefile=' /var/etc/dnsmasq.conf.* 2>/dev/null | head -1 | cut -d= -f2", 'r');
-        if (dnsmasqConf) {
-            const path = trim(dnsmasqConf.read('all') || '');
-            dnsmasqConf.close();
-            if (path) leasefile = path;
-        }
-    }
+	const uci = cursor();
+	let leasefile = uci.get('dhcp', '@dnsmasq[0]', 'leasefile');
+	// Fallback: dnsmasq generated config
+	if (!leasefile || !access(leasefile, 'r')) {
+		const dnsmasqConf = popen("grep -sh 'dhcp-leasefile=' /var/etc/dnsmasq.conf.* 2>/dev/null | head -1 | cut -d= -f2", 'r');
+		if (dnsmasqConf) {
+			const path = trim(dnsmasqConf.read('all') || '');
+			dnsmasqConf.close();
+			if (path) leasefile = path;
+		}
+	}
 
-    const leaseFile = (leasefile && access(leasefile, 'r')) ? open(leasefile, 'r') : null;
-    if (leaseFile) {
-        let line;
-        while ((line = leaseFile.read('line')) !== null) {
-            // Format: "1234567890 aa:bb:cc:dd:ee:ff 192.168.1.1 hostname *"
-            const parts = split(trim(line), ' ');
-            if (length(parts) >= 3 && lc(parts[1]) === macLower) {
-                leaseFile.close();
-                return parts[2];
-            }
-        }
-        leaseFile.close();
-    }
+	const leaseFile = (leasefile && access(leasefile, 'r')) ? open(leasefile, 'r') : null;
+	if (leaseFile) {
+		let line;
+		while ((line = leaseFile.read('line')) !== null) {
+			// Format: "1234567890 aa:bb:cc:dd:ee:ff 192.168.1.1 hostname *"
+			const parts = split(trim(line), ' ');
+			if (length(parts) >= 3 && lc(parts[1]) === macLower) {
+				leaseFile.close();
+				return parts[2];
+			}
+		}
+		leaseFile.close();
+	}
 
-    return null;
+	return null;
 }
 
-// Read state.json and return parsed state
 function readState() {
-    const stateFile = TEMP_DIR + '/state.json';
-    const file = open(stateFile, 'r');
-    if (!file) return { version: 2, devices: {} };
-    const content = file.read('all');
-    file.close();
-    if (!content) return { version: 2, devices: {} };
-    const parsed = json(content);
-    return parsed || { version: 2, devices: {} };
+	const stateFile = TEMP_DIR + '/state.json';
+	const file = open(stateFile, 'r');
+	if (!file) return { version: 2, devices: {} };
+	const content = file.read('all');
+	file.close();
+	if (!content) return { version: 2, devices: {} };
+	let parsed = null;
+	try { parsed = json(content); } catch(e) {}
+	return parsed || { version: 2, devices: {} };
 }
 
-// Method: Get all devices
 function getDevices() {
-    const uci = cursor();
-    const devices = [];
-    const state = readState();
+	const uci = cursor();
+	const devices = [];
+	const state = readState();
 
-    // Collect config data inside forEach (simple field reads only)
-    // Function calls (getActiveSchedule, resolveIpFromMac) are done outside
-    // to avoid potential rpcd/ucode crash with function calls in loops
-    const deviceConfigs = [];
-    uci.foreach('device_timer', 'device', (s) => {
-        let scheduleList = [];
-        if (s.schedule && type(s.schedule) === 'array') {
-            for (let i = 0; i < length(s.schedule); i++)
-                push(scheduleList, s.schedule[i]);
-        } else if (s.schedule && type(s.schedule) === 'string') {
-            scheduleList = [s.schedule];
-        }
-        push(deviceConfigs, {
-            id: s['.name'],
-            name: s.name || 'Unknown',
-            mac: s.mac || '',
-            enabled: s.enabled,
-            schedule: scheduleList,
-            traffic_threshold: s.traffic_threshold || null
-        });
-    });
+	// Avoid function calls inside forEach (rpcd/ucode crash workaround)
+	const deviceConfigs = [];
+	uci.foreach('device_timer', 'device', (s) => {
+		let scheduleList = [];
+		if (s.schedule && type(s.schedule) === 'array') {
+			for (let i = 0; i < length(s.schedule); i++)
+				push(scheduleList, s.schedule[i]);
+		} else if (s.schedule && type(s.schedule) === 'string') {
+			scheduleList = [s.schedule];
+		}
+		push(deviceConfigs, {
+			id: s['.name'],
+			name: s.name || 'Unknown',
+			mac: s.mac || '',
+			enabled: s.enabled,
+			schedule: scheduleList,
+			traffic_threshold: s.traffic_threshold || null
+		});
+	});
 
-    // Process outside forEach to avoid rpcd function-call-in-loop crashes
-    for (let i = 0; i < length(deviceConfigs); i++) {
-        let cfg = deviceConfigs[i];
-        const deviceEnabled = (cfg.enabled === '0') ? 0 : 1;
+	for (let i = 0; i < length(deviceConfigs); i++) {
+		let cfg = deviceConfigs[i];
+		const deviceEnabled = (cfg.enabled === '0') ? 0 : 1;
 
-        const deviceState = (state.devices && state.devices[cfg.id]) ? state.devices[cfg.id] : {};
-        const usageSeconds = (deviceState.usage && deviceState.usage > 0) ? deviceState.usage : 0;
-        const usageMinutes = int(usageSeconds / 60);
-        const flatrateActive = (deviceState.flatrate === 1) ? 1 : 0;
-        const pauseActive = (deviceState.paused === 1) ? 1 : 0;
+		const deviceState = (state.devices && state.devices[cfg.id]) ? state.devices[cfg.id] : {};
+		const usageSeconds = (deviceState.usage && deviceState.usage > 0) ? deviceState.usage : 0;
+		const usageMinutes = int(usageSeconds / 60);
+		const flatrateActive = (deviceState.flatrate === 1) ? 1 : 0;
+		const pauseActive = (deviceState.paused === 1) ? 1 : 0;
 
-        const activeSchedule = getActiveSchedule(cfg.schedule);
+		const activeSchedule = getActiveSchedule(cfg.schedule);
 
-        const hasScheduleToday = (activeSchedule.status !== 'no_schedule');
-        const inTimeWindow = (activeSchedule.status === 'active');
-        const timeLimit = activeSchedule.limit || 0;
+		const hasScheduleToday = (activeSchedule.status !== 'no_schedule');
+		const inTimeWindow = (activeSchedule.status === 'active');
+		const timeLimit = activeSchedule.limit || 0;
 
-        let status = 'inactive';
-        if (!deviceEnabled) {
-            status = 'disabled';
-        } else if (pauseActive === 1) {
-            status = 'paused';
-        } else if (activeSchedule.status === 'no_schedule') {
-            status = 'no_schedule';
-        } else if (activeSchedule.status === 'outside_window') {
-            status = 'outside_window';
-        } else if (flatrateActive === 1 || timeLimit === 0) {
-            status = 'unlimited';
-        } else if (usageMinutes >= timeLimit) {
-            status = 'blocked';
-        } else {
-            status = 'active';
-        }
+		let status = 'inactive';
+		if (!deviceEnabled) {
+			status = 'disabled';
+		} else if (pauseActive === 1) {
+			status = 'paused';
+		} else if (activeSchedule.status === 'no_schedule') {
+			status = 'no_schedule';
+		} else if (activeSchedule.status === 'outside_window') {
+			status = 'outside_window';
+		} else if (flatrateActive === 1 || timeLimit === 0) {
+			status = 'unlimited';
+		} else if (usageMinutes >= timeLimit) {
+			status = 'blocked';
+		} else {
+			status = 'active';
+		}
 
-        const ip = resolveIpFromMac(cfg.mac);
+		const ip = resolveIpFromMac(cfg.mac);
 
-        push(devices, {
-            id: cfg.id,
-            name: cfg.name,
-            ip: ip,
-            mac: cfg.mac,
-            schedule: cfg.schedule,
-            todays_limit: timeLimit,
-            usage_minutes: usageMinutes,
-            enabled: deviceEnabled,
-            status: status,
-            has_schedule_today: hasScheduleToday ? 1 : 0,
-            in_time_window: inTimeWindow ? 1 : 0,
-            todays_timerange: activeSchedule.timerange,
-            traffic_threshold: cfg.traffic_threshold,
-            flatrate_active: flatrateActive,
-            pause_active: pauseActive
-        });
-    }
+		push(devices, {
+			id: cfg.id,
+			name: cfg.name,
+			ip: ip,
+			mac: cfg.mac,
+			schedule: cfg.schedule,
+			todays_limit: timeLimit,
+			usage_minutes: usageMinutes,
+			enabled: deviceEnabled,
+			status: status,
+			has_schedule_today: hasScheduleToday ? 1 : 0,
+			in_time_window: inTimeWindow ? 1 : 0,
+			todays_timerange: activeSchedule.timerange,
+			traffic_threshold: cfg.traffic_threshold,
+			flatrate_active: flatrateActive,
+			pause_active: pauseActive
+		});
+	}
 
-    return { devices: devices };
+	return { devices: devices };
 }
 
-// Method: Get single device
 function getDevice(request) {
-    const id = (request.args && request.args.id) ? request.args.id : null;
-    if (!id) return { error: 'Missing device id' };
-    if (!isValidId(id)) return { error: 'Invalid device id' };
+	const id = (request.args && request.args.id) ? request.args.id : null;
+	if (!id) return { error: 'Missing device id' };
+	if (!isValidId(id)) return { error: 'Invalid device id' };
 
-    const uci = cursor();
-    const s = uci.get_all('device_timer', id);
-    if (!s || s['.type'] !== 'device') return { error: 'Device not found' };
+	const uci = cursor();
+	const s = uci.get_all('device_timer', id);
+	if (!s || s['.type'] !== 'device') return { error: 'Device not found' };
 
-    const deviceEnabled = (s.enabled === '0') ? 0 : 1;
+	const deviceEnabled = (s.enabled === '0') ? 0 : 1;
 
-    // Read state once (avoid redundant file reads)
-    const state = readState();
-    const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
-    const usageSeconds = (deviceState.usage && deviceState.usage > 0) ? deviceState.usage : 0;
-    const usageMinutes = int(usageSeconds / 60);
-    const flatrateActive = (deviceState.flatrate === 1) ? 1 : 0;
-    const pauseActive = (deviceState.paused === 1) ? 1 : 0;
+	const state = readState();
+	const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
+	const usageSeconds = (deviceState.usage && deviceState.usage > 0) ? deviceState.usage : 0;
+	const usageMinutes = int(usageSeconds / 60);
+	const flatrateActive = (deviceState.flatrate === 1) ? 1 : 0;
+	const pauseActive = (deviceState.paused === 1) ? 1 : 0;
 
-    // Get schedule list (array of "Day,HH:MM-HH:MM,Limit")
-    // Handle both array (uci add_list) and string (uci set) cases
-    let scheduleList = [];
-    if (s.schedule && type(s.schedule) === 'array') {
-        scheduleList = s.schedule;
-    } else if (s.schedule && type(s.schedule) === 'string') {
-        scheduleList = [s.schedule];
-    }
-    const activeSchedule = getActiveSchedule(scheduleList);
+	let scheduleList = [];
+	if (s.schedule && type(s.schedule) === 'array') {
+		scheduleList = s.schedule;
+	} else if (s.schedule && type(s.schedule) === 'string') {
+		scheduleList = [s.schedule];
+	}
+	const activeSchedule = getActiveSchedule(scheduleList);
 
-    const hasScheduleToday = (activeSchedule.status !== 'no_schedule');
-    const inTimeWindow = (activeSchedule.status === 'active');
-    const timeLimit = activeSchedule.limit || 0;
+	const hasScheduleToday = (activeSchedule.status !== 'no_schedule');
+	const inTimeWindow = (activeSchedule.status === 'active');
+	const timeLimit = activeSchedule.limit || 0;
 
-    let status = 'inactive';
-    if (!deviceEnabled) {
-        status = 'disabled';
-    } else if (pauseActive === 1) {
-        status = 'paused';
-    } else if (activeSchedule.status === 'no_schedule') {
-        status = 'no_schedule';
-    } else if (activeSchedule.status === 'outside_window') {
-        status = 'outside_window';
-    } else if (flatrateActive === 1 || timeLimit === 0) {
-        status = 'unlimited';
-    } else if (usageMinutes >= timeLimit) {
-        status = 'blocked';
-    } else {
-        status = 'active';
-    }
+	let status = 'inactive';
+	if (!deviceEnabled) {
+		status = 'disabled';
+	} else if (pauseActive === 1) {
+		status = 'paused';
+	} else if (activeSchedule.status === 'no_schedule') {
+		status = 'no_schedule';
+	} else if (activeSchedule.status === 'outside_window') {
+		status = 'outside_window';
+	} else if (flatrateActive === 1 || timeLimit === 0) {
+		status = 'unlimited';
+	} else if (usageMinutes >= timeLimit) {
+		status = 'blocked';
+	} else {
+		status = 'active';
+	}
 
-    const mac = s.mac || '';
-    const ip = resolveIpFromMac(mac);
+	const mac = s.mac || '';
+	const ip = resolveIpFromMac(mac);
 
-    return {
-        id: id,
-        name: s.name || 'Unknown',
-        ip: ip,
-        mac: mac,
-        schedule: scheduleList,
-        todays_limit: timeLimit,
-        usage_minutes: usageMinutes,
-        enabled: deviceEnabled,
-        status: status,
-        has_schedule_today: hasScheduleToday ? 1 : 0,
-        in_time_window: inTimeWindow ? 1 : 0,
-        todays_timerange: activeSchedule.timerange,
-        traffic_threshold: s.traffic_threshold || null,
-        flatrate_active: flatrateActive,
-        pause_active: pauseActive
-    };
+	return {
+		id: id,
+		name: s.name || 'Unknown',
+		ip: ip,
+		mac: mac,
+		schedule: scheduleList,
+		todays_limit: timeLimit,
+		usage_minutes: usageMinutes,
+		enabled: deviceEnabled,
+		status: status,
+		has_schedule_today: hasScheduleToday ? 1 : 0,
+		in_time_window: inTimeWindow ? 1 : 0,
+		todays_timerange: activeSchedule.timerange,
+		traffic_threshold: s.traffic_threshold || null,
+		flatrate_active: flatrateActive,
+		pause_active: pauseActive
+	};
 }
 
-// Single-writer: only the daemon writes state.json.
-// rpcd queues commands via state.json.rpc for daemon processing.
+// Single-writer: daemon owns state.json, rpcd queues via state.json.rpc
 function queueRpcUpdate(command) {
-    const rpcFile = TEMP_DIR + '/state.json.rpc';
-    const lockFile = TEMP_DIR + '/state.lock';
-    const pidFile = '/var/run/device_timer.pid';
+	const rpcFile = TEMP_DIR + '/state.json.rpc';
+	const lockFile = TEMP_DIR + '/state.lock';
+	const pidFile = '/var/run/device_timer.pid';
 
-    system('mkdir -p ' + shellquote(TEMP_DIR));
+	system('mkdir -p ' + shellquote(TEMP_DIR));
 
-    // Atomic append with flock
-    system('flock ' + shellquote(lockFile) + ' -c ' +
-           shellquote('printf \'%s\\n\' ' + shellquote(command) +
-                      ' >> ' + shellquote(rpcFile)));
+	system('flock ' + shellquote(lockFile) + ' -c ' +
+		shellquote('printf \'%s\\n\' ' + shellquote(command) +
+			' >> ' + shellquote(rpcFile)));
 
-    // Wake daemon via SIGUSR1
-    const pf = open(pidFile, 'r');
-    if (pf) {
-        const content = pf.read('all');
-        pf.close();
-        const pid = content ? trim(content) : '';
-        if (pid && match(pid, /^[0-9]+$/)) {
-            system('kill -USR1 ' + pid + ' 2>/dev/null');
-        }
-    }
+	// Signal daemon to process queued commands
+	const pf = open(pidFile, 'r');
+	if (pf) {
+		const content = pf.read('all');
+		pf.close();
+		const pid = content ? trim(content) : '';
+		if (pid && match(pid, /^[0-9]+$/)) {
+			system('kill -USR1 ' + pid + ' 2>/dev/null');
+		}
+	}
 }
 
-// Method: Reset device counter
 function resetDevice(request) {
-    const id = (request.args && request.args.id) ? request.args.id : null;
-    if (!id) return { error: 'Missing device id' };
-    if (!isValidId(id)) return { error: 'Invalid device id' };
+	const id = (request.args && request.args.id) ? request.args.id : null;
+	if (!id) return { error: 'Missing device id' };
+	if (!isValidId(id)) return { error: 'Invalid device id' };
 
-    // Verify device exists
-    const uci = cursor();
-    const s = uci.get_all('device_timer', id);
-    if (!s || s['.type'] !== 'device') {
-        return { error: 'Device not found' };
-    }
+	const uci = cursor();
+	const s = uci.get_all('device_timer', id);
+	if (!s || s['.type'] !== 'device') {
+		return { error: 'Device not found' };
+	}
 
-    queueRpcUpdate('RPC_RESET\t' + id);
+	queueRpcUpdate('RPC_RESET\t' + id);
 
-    return {
-        success: true,
-        id: id,
-        message: 'Counter reset successfully'
-    };
+	return {
+		success: true,
+		id: id,
+		message: 'Counter reset successfully'
+	};
 }
 
-// Method: Set flatrate for a device
 function setFlatrate(request) {
-    const id = (request.args && request.args.id) ? request.args.id : null;
-    const enabled = (request.args && request.args.enabled != null) ? request.args.enabled : null;
+	const id = (request.args && request.args.id) ? request.args.id : null;
+	const enabled = (request.args && request.args.enabled != null) ? request.args.enabled : null;
 
-    if (!id) return { error: 'Missing device id' };
-    if (enabled === null) return { error: 'Missing enabled parameter' };
-    if (!isValidId(id)) return { error: 'Invalid device id' };
+	if (!id) return { error: 'Missing device id' };
+	if (enabled === null) return { error: 'Missing enabled parameter' };
+	if (!isValidId(id)) return { error: 'Invalid device id' };
 
-    const enabledInt = int(enabled);
-    if (enabledInt !== 0 && enabledInt !== 1) {
-        return { error: 'Invalid enabled value (must be 0 or 1)' };
-    }
+	const enabledInt = int(enabled);
+	if (enabledInt !== 0 && enabledInt !== 1) {
+		return { error: 'Invalid enabled value (must be 0 or 1)' };
+	}
 
-    // Verify device exists
-    const uci = cursor();
-    const s = uci.get_all('device_timer', id);
-    if (!s || s['.type'] !== 'device') {
-        return { error: 'Device not found' };
-    }
+	const uci = cursor();
+	const s = uci.get_all('device_timer', id);
+	if (!s || s['.type'] !== 'device') {
+		return { error: 'Device not found' };
+	}
 
-    queueRpcUpdate('RPC_FLATRATE\t' + id + '\t' + enabledInt);
+	queueRpcUpdate('RPC_FLATRATE\t' + id + '\t' + enabledInt);
 
-    return {
-        success: true,
-        id: id,
-        flatrate: enabledInt,
-        message: enabledInt ? 'Flatrate enabled' : 'Flatrate disabled'
-    };
+	return {
+		success: true,
+		id: id,
+		flatrate: enabledInt,
+		message: enabledInt ? 'Flatrate enabled' : 'Flatrate disabled'
+	};
 }
 
-// Method: Set pause for a device (immediately blocks internet access)
 function setPause(request) {
-    const id = (request.args && request.args.id) ? request.args.id : null;
-    const enabled = (request.args && request.args.enabled != null) ? request.args.enabled : null;
+	const id = (request.args && request.args.id) ? request.args.id : null;
+	const enabled = (request.args && request.args.enabled != null) ? request.args.enabled : null;
 
-    if (!id) return { error: 'Missing device id' };
-    if (enabled === null) return { error: 'Missing enabled parameter' };
-    if (!isValidId(id)) return { error: 'Invalid device id' };
+	if (!id) return { error: 'Missing device id' };
+	if (enabled === null) return { error: 'Missing enabled parameter' };
+	if (!isValidId(id)) return { error: 'Invalid device id' };
 
-    const enabledInt = int(enabled);
-    if (enabledInt !== 0 && enabledInt !== 1) {
-        return { error: 'Invalid enabled value (must be 0 or 1)' };
-    }
+	const enabledInt = int(enabled);
+	if (enabledInt !== 0 && enabledInt !== 1) {
+		return { error: 'Invalid enabled value (must be 0 or 1)' };
+	}
 
-    // Verify device exists
-    const uci = cursor();
-    const s = uci.get_all('device_timer', id);
-    if (!s || s['.type'] !== 'device') {
-        return { error: 'Device not found' };
-    }
+	const uci = cursor();
+	const s = uci.get_all('device_timer', id);
+	if (!s || s['.type'] !== 'device') {
+		return { error: 'Device not found' };
+	}
 
-    queueRpcUpdate('RPC_PAUSE\t' + id + '\t' + enabledInt);
+	queueRpcUpdate('RPC_PAUSE\t' + id + '\t' + enabledInt);
 
-    return {
-        success: true,
-        id: id,
-        paused: enabledInt,
-        message: enabledInt ? 'Pause enabled' : 'Pause disabled'
-    };
+	return {
+		success: true,
+		id: id,
+		paused: enabledInt,
+		message: enabledInt ? 'Pause enabled' : 'Pause disabled'
+	};
 }
 
-// Method: Get global settings
 function getSettings() {
-    const uci = cursor();
-    return {
-        enabled: int(uci.get('device_timer', 'settings', 'enabled')) || 0,
-        default_threshold: uci.get('device_timer', 'settings', 'default_threshold') || '6M',
-        poll_interval: int(uci.get('device_timer', 'settings', 'poll_interval')) || 60
-    };
+	const uci = cursor();
+	return {
+		enabled: int(uci.get('device_timer', 'settings', 'enabled')) || 0,
+		default_threshold: uci.get('device_timer', 'settings', 'default_threshold') || '6M',
+		poll_interval: int(uci.get('device_timer', 'settings', 'poll_interval')) || 60
+	};
 }
 
-// Method: Get daemon status
 function getDaemonStatus() {
-    const pidFile = '/var/run/device_timer.pid';
-    const lastDateFile = TEMP_DIR + '/last_date';
+	const pidFile = '/var/run/device_timer.pid';
+	const lastDateFile = TEMP_DIR + '/last_date';
 
-    let running = false;
-    let pid = null;
-    let lastResetDate = null;
+	let running = false;
+	let pid = null;
+	let lastResetDate = null;
 
-    // Read PID file
-    const pf = open(pidFile, 'r');
-    if (pf) {
-        const content = pf.read('all');
-        pf.close();
-        if (content) pid = int(trim(content));
+	const pf = open(pidFile, 'r');
+	if (pf) {
+		const content = pf.read('all');
+		pf.close();
+		if (content) pid = int(trim(content));
 
-        // Check if process exists via /proc
-        if (pid > 0 && access('/proc/' + pid, 'r')) {
-            running = true;
-        } else {
-            pid = null;
-        }
-    }
+		if (pid > 0 && access('/proc/' + pid, 'r')) {
+			running = true;
+		} else {
+			pid = null;
+		}
+	}
 
-    // Read last reset date
-    const df = open(lastDateFile, 'r');
-    if (df) {
-        const dateContent = df.read('all');
-        df.close();
-        if (dateContent) lastResetDate = trim(dateContent);
-    }
+	const df = open(lastDateFile, 'r');
+	if (df) {
+		const dateContent = df.read('all');
+		df.close();
+		if (dateContent) lastResetDate = trim(dateContent);
+	}
 
-    const uci = cursor();
-    const pollInterval = int(uci.get('device_timer', 'settings', 'poll_interval')) || 60;
+	const uci = cursor();
+	const pollInterval = int(uci.get('device_timer', 'settings', 'poll_interval')) || 60;
 
-    return {
-        running: running,
-        pid: pid,
-        poll_interval: pollInterval,
-        last_reset_date: lastResetDate
-    };
+	return {
+		running: running,
+		pid: pid,
+		poll_interval: pollInterval,
+		last_reset_date: lastResetDate
+	};
 }
 
-// Method: Validate schedule list for overlaps (delegates to shared module)
 function validateSchedules(request) {
-    const schedules = (request.args && request.args.schedules) ? request.args.schedules : null;
-    return validation.validateScheduleList(schedules);
+	const schedules = (request.args && request.args.schedules) ? request.args.schedules : null;
+	return validation.validateScheduleList(schedules);
 }
 
-// Method: Start calibration (phase 1 — idle measurement)
 function startCalibration(request) {
-    const id = (request.args && request.args.id) ? request.args.id : null;
-    const duration = (request.args && request.args.duration != null) ? request.args.duration : 1800;
+	const id = (request.args && request.args.id) ? request.args.id : null;
+	const duration = (request.args && request.args.duration != null) ? request.args.duration : 1800;
 
-    if (!id) return { error: 'Missing device id' };
-    if (!isValidId(id)) return { error: 'Invalid device id' };
+	if (!id) return { error: 'Missing device id' };
+	if (!isValidId(id)) return { error: 'Invalid device id' };
 
-    const durationInt = int(duration);
-    const paramValidation = calibration.validateCalibrationParams(durationInt);
-    if (!paramValidation.valid) {
-        return { error: paramValidation.error };
-    }
+	const durationInt = int(duration);
+	const paramValidation = calibration.validateCalibrationParams(durationInt);
+	if (!paramValidation.valid) {
+		return { error: paramValidation.error };
+	}
 
-    const uci = cursor();
-    const s = uci.get_all('device_timer', id);
-    if (!s || s['.type'] !== 'device') {
-        return { error: 'Device not found' };
-    }
-    if (s.enabled === '0') {
-        return { error: 'Device must be enabled for calibration' };
-    }
+	const uci = cursor();
+	const s = uci.get_all('device_timer', id);
+	if (!s || s['.type'] !== 'device') {
+		return { error: 'Device not found' };
+	}
+	if (s.enabled === '0') {
+		return { error: 'Device must be enabled for calibration' };
+	}
 
-    queueRpcUpdate('RPC_CAL_START\t' + id + '\t' + durationInt);
+	queueRpcUpdate('RPC_CAL_START\t' + id + '\t' + durationInt);
 
-    return {
-        success: true,
-        id: id,
-        duration: durationInt,
-        message: 'Calibration started (phase 1: idle measurement)'
-    };
+	return {
+		success: true,
+		id: id,
+		duration: durationInt,
+		message: 'Calibration started (phase 1: idle measurement)'
+	};
 }
 
-// Method: Start calibration phase 2 (usage measurement)
 function startCalibrationPhase2(request) {
-    const id = (request.args && request.args.id) ? request.args.id : null;
+	const id = (request.args && request.args.id) ? request.args.id : null;
 
-    if (!id) return { error: 'Missing device id' };
-    if (!isValidId(id)) return { error: 'Invalid device id' };
+	if (!id) return { error: 'Missing device id' };
+	if (!isValidId(id)) return { error: 'Invalid device id' };
 
-    const state = readState();
-    const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
-    const cal = deviceState.calibration;
+	const state = readState();
+	const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
+	const cal = deviceState.calibration;
 
-    if (!cal || cal.status !== 'phase1_done') {
-        return { error: 'Phase 1 must be completed before starting phase 2' };
-    }
+	if (!cal || cal.status !== 'phase1_done') {
+		return { error: 'Phase 1 must be completed before starting phase 2' };
+	}
 
-    queueRpcUpdate('RPC_CAL_START_P2\t' + id);
+	queueRpcUpdate('RPC_CAL_START_P2\t' + id);
 
-    return {
-        success: true,
-        id: id,
-        message: 'Calibration phase 2 started (usage measurement)'
-    };
+	return {
+		success: true,
+		id: id,
+		message: 'Calibration phase 2 started (usage measurement)'
+	};
 }
 
-// Method: Get calibration status (two-phase aware)
 function getCalibration(request) {
-    const id = (request.args && request.args.id) ? request.args.id : null;
-    if (!id) return { error: 'Missing device id' };
-    if (!isValidId(id)) return { error: 'Invalid device id' };
+	const id = (request.args && request.args.id) ? request.args.id : null;
+	if (!id) return { error: 'Missing device id' };
+	if (!isValidId(id)) return { error: 'Invalid device id' };
 
-    const uci = cursor();
-    const s = uci.get_all('device_timer', id);
-    if (!s || s['.type'] !== 'device') return { error: 'Device not found' };
+	const uci = cursor();
+	const s = uci.get_all('device_timer', id);
+	if (!s || s['.type'] !== 'device') return { error: 'Device not found' };
 
-    const state = readState();
-    const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
-    const cal = (deviceState.calibration) ? deviceState.calibration : null;
+	const state = readState();
+	const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
+	const cal = (deviceState.calibration) ? deviceState.calibration : null;
 
-    if (!cal) {
-        return {
-            id: id,
-            status: 'idle',
-            phase1_elapsed: 0,
-            phase2_elapsed: 0,
-            idle_duration: 0,
-            usage_duration: 0,
-            phase1_samples: 0,
-            phase2_samples: 0,
-            phase1_progress: 0,
-            phase2_progress: 0
-        };
-    }
+	if (!cal) {
+		return {
+			id: id,
+			status: 'idle',
+			phase1_elapsed: 0,
+			phase2_elapsed: 0,
+			idle_duration: 0,
+			usage_duration: 0,
+			phase1_samples: 0,
+			phase2_samples: 0,
+			phase1_progress: 0,
+			phase2_progress: 0
+		};
+	}
 
-    const currentTime = time();
-    const idleDur = cal.idle_duration || 0;
-    const usageDur = cal.usage_duration || 0;
-    const pollInterval = int(uci.get('device_timer', 'settings', 'poll_interval')) || 60;
-    const p1Samples = (cal.phase1_samples && length(cal.phase1_samples)) ? length(cal.phase1_samples) : 0;
-    const p2Samples = (cal.phase2_samples && length(cal.phase2_samples)) ? length(cal.phase2_samples) : 0;
+	const currentTime = time();
+	const idleDur = cal.idle_duration || 0;
+	const usageDur = cal.usage_duration || 0;
+	const pollInterval = int(uci.get('device_timer', 'settings', 'poll_interval')) || 60;
+	const p1Samples = (cal.phase1_samples && length(cal.phase1_samples)) ? length(cal.phase1_samples) : 0;
+	const p2Samples = (cal.phase2_samples && length(cal.phase2_samples)) ? length(cal.phase2_samples) : 0;
 
-    let phase1Elapsed = 0;
-    let phase2Elapsed = 0;
-    let phase1Progress = 0;
-    let phase2Progress = 0;
+	let phase1Elapsed = 0;
+	let phase2Elapsed = 0;
+	let phase1Progress = 0;
+	let phase2Progress = 0;
 
-    if (cal.status === 'phase1_running') {
-        phase1Elapsed = currentTime - (cal.start_time || 0);
-        let effectiveDur = idleDur + pollInterval;
-        if (phase1Elapsed > effectiveDur) phase1Elapsed = effectiveDur;
-        phase1Progress = (effectiveDur > 0) ? int((phase1Elapsed * 100) / effectiveDur) : 0;
-        if (phase1Progress > 99) phase1Progress = 99;
-    } else if (cal.status === 'phase1_done' || cal.status === 'phase2_running' || cal.status === 'completed') {
-        phase1Elapsed = idleDur;
-        phase1Progress = 100;
-    }
+	if (cal.status === 'phase1_running') {
+		phase1Elapsed = currentTime - (cal.start_time || 0);
+		let effectiveDur = idleDur + pollInterval;
+		if (phase1Elapsed > effectiveDur) phase1Elapsed = effectiveDur;
+		phase1Progress = (effectiveDur > 0) ? int((phase1Elapsed * 100) / effectiveDur) : 0;
+		if (phase1Progress > 99) phase1Progress = 99;
+	} else if (cal.status === 'phase1_done' || cal.status === 'phase2_running' || cal.status === 'completed') {
+		phase1Elapsed = idleDur;
+		phase1Progress = 100;
+	}
 
-    if (cal.status === 'phase2_running') {
-        phase2Elapsed = currentTime - (cal.phase2_start_time || 0);
-        let effectiveDur = usageDur + pollInterval;
-        if (phase2Elapsed > effectiveDur) phase2Elapsed = effectiveDur;
-        phase2Progress = (effectiveDur > 0) ? int((phase2Elapsed * 100) / effectiveDur) : 0;
-        if (phase2Progress > 99) phase2Progress = 99;
-    } else if (cal.status === 'completed') {
-        phase2Elapsed = usageDur;
-        phase2Progress = 100;
-    }
+	if (cal.status === 'phase2_running') {
+		phase2Elapsed = currentTime - (cal.phase2_start_time || 0);
+		let effectiveDur = usageDur + pollInterval;
+		if (phase2Elapsed > effectiveDur) phase2Elapsed = effectiveDur;
+		phase2Progress = (effectiveDur > 0) ? int((phase2Elapsed * 100) / effectiveDur) : 0;
+		if (phase2Progress > 99) phase2Progress = 99;
+	} else if (cal.status === 'completed') {
+		phase2Elapsed = usageDur;
+		phase2Progress = 100;
+	}
 
-    if (phase1Progress > 100) phase1Progress = 100;
-    if (phase2Progress > 100) phase2Progress = 100;
+	if (phase1Progress > 100) phase1Progress = 100;
+	if (phase2Progress > 100) phase2Progress = 100;
 
-    return {
-        id: id,
-        status: cal.status,
-        phase1_elapsed: phase1Elapsed,
-        phase2_elapsed: phase2Elapsed,
-        idle_duration: idleDur,
-        usage_duration: usageDur,
-        poll_interval: pollInterval,
-        phase1_samples: p1Samples,
-        phase2_samples: p2Samples,
-        phase1_progress: phase1Progress,
-        phase2_progress: phase2Progress,
-        result_idle_p95: cal.result_idle_p95 || 0,
-        result_idle_median: cal.result_idle_median || 0,
-        result_stream_p5: cal.result_stream_p5 || 0,
-        result_stream_median: cal.result_stream_median || 0,
-        result_stream_outliers: cal.result_stream_outliers || 0,
-        result_recommended: cal.result_recommended || 0,
-        result_overlap: cal.result_overlap || 0,
-        error_message: cal.error_message || ''
-    };
+	return {
+		id: id,
+		status: cal.status,
+		phase1_elapsed: phase1Elapsed,
+		phase2_elapsed: phase2Elapsed,
+		idle_duration: idleDur,
+		usage_duration: usageDur,
+		poll_interval: pollInterval,
+		phase1_samples: p1Samples,
+		phase2_samples: p2Samples,
+		phase1_progress: phase1Progress,
+		phase2_progress: phase2Progress,
+		result_idle_p95: cal.result_idle_p95 || 0,
+		result_idle_median: cal.result_idle_median || 0,
+		result_stream_p5: cal.result_stream_p5 || 0,
+		result_stream_median: cal.result_stream_median || 0,
+		result_stream_outliers: cal.result_stream_outliers || 0,
+		result_recommended: cal.result_recommended || 0,
+		result_overlap: cal.result_overlap || 0,
+		error_message: cal.error_message || ''
+	};
 }
 
-// Method: Apply calibration result
 function applyCalibration(request) {
-    const id = (request.args && request.args.id) ? request.args.id : null;
-    if (!id) return { error: 'Missing device id' };
-    if (!isValidId(id)) return { error: 'Invalid device id' };
+	const id = (request.args && request.args.id) ? request.args.id : null;
+	if (!id) return { error: 'Missing device id' };
+	if (!isValidId(id)) return { error: 'Invalid device id' };
 
-    // Read-only: validate calibration status
-    const state = readState();
-    const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
-    const cal = (deviceState.calibration) ? deviceState.calibration : null;
+	const state = readState();
+	const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
+	const cal = (deviceState.calibration) ? deviceState.calibration : null;
 
-    if (!cal || cal.status !== 'completed') {
-        return { error: 'No completed calibration found' };
-    }
+	if (!cal || cal.status !== 'completed') {
+		return { error: 'No completed calibration found' };
+	}
 
-    if (!cal.result_recommended || cal.result_recommended <= 0) {
-        return { error: 'Invalid calibration result' };
-    }
+	if (!cal.result_recommended || cal.result_recommended <= 0) {
+		return { error: 'Invalid calibration result' };
+	}
 
-    const thresholdStr = calibration.formatThreshold(cal.result_recommended);
+	const thresholdStr = calibration.formatThreshold(cal.result_recommended);
 
-    // UCI write stays in rpcd (not state.json)
-    const uci = cursor();
-    uci.set('device_timer', id, 'traffic_threshold', thresholdStr);
-    if (!uci.commit('device_timer')) {
-        return { success: false, error: 'Failed to commit UCI changes' };
-    }
+	const uci = cursor();
+	uci.set('device_timer', id, 'traffic_threshold', thresholdStr);
+	if (!uci.commit('device_timer')) {
+		return { success: false, error: 'Failed to commit UCI changes' };
+	}
 
-    // Clear calibration state via daemon
-    queueRpcUpdate('RPC_CAL_CLEAR\t' + id);
+	queueRpcUpdate('RPC_CAL_CLEAR\t' + id);
 
-    return {
-        success: true,
-        id: id,
-        threshold: thresholdStr,
-        message: 'Threshold applied successfully'
-    };
+	return {
+		success: true,
+		id: id,
+		threshold: thresholdStr,
+		message: 'Threshold applied successfully'
+	};
 }
 
-// Method: Cancel calibration (any active phase)
 function cancelCalibration(request) {
-    const id = (request.args && request.args.id) ? request.args.id : null;
-    if (!id) return { error: 'Missing device id' };
-    if (!isValidId(id)) return { error: 'Invalid device id' };
+	const id = (request.args && request.args.id) ? request.args.id : null;
+	if (!id) return { error: 'Missing device id' };
+	if (!isValidId(id)) return { error: 'Invalid device id' };
 
-    const state = readState();
-    const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
-    const calStatus = (deviceState.calibration) ? deviceState.calibration.status : 'idle';
+	const state = readState();
+	const deviceState = (state.devices && state.devices[id]) ? state.devices[id] : {};
+	const calStatus = (deviceState.calibration) ? deviceState.calibration.status : 'idle';
 
-    if (calStatus === 'idle') {
-        return { error: 'No active calibration to cancel' };
-    }
+	if (calStatus === 'idle') {
+		return { error: 'No active calibration to cancel' };
+	}
 
-    queueRpcUpdate('RPC_CAL_CLEAR\t' + id);
+	queueRpcUpdate('RPC_CAL_CLEAR\t' + id);
 
-    return {
-        success: true,
-        id: id,
-        message: 'Calibration cancelled'
-    };
+	return {
+		success: true,
+		id: id,
+		message: 'Calibration cancelled'
+	};
 }
 
-// Export methods
 const methods = {
-    devices: { call: getDevices },
-    device: { args: { id: 'id' }, call: getDevice },
-    reset: { args: { id: 'id' }, call: resetDevice },
-    setflatrate: { args: { id: 'id', enabled: 1 }, call: setFlatrate },
-    setpause: { args: { id: 'id', enabled: 1 }, call: setPause },
-    settings: { call: getSettings },
-    status: { call: getDaemonStatus },
-    validate: { args: { schedules: [] }, call: validateSchedules },
-    startcalibration: { args: { id: 'id', duration: 1800 }, call: startCalibration },
-    startcalibrationphase2: { args: { id: 'id' }, call: startCalibrationPhase2 },
-    getcalibration: { args: { id: 'id' }, call: getCalibration },
-    applycalibration: { args: { id: 'id' }, call: applyCalibration },
-    cancelcalibration: { args: { id: 'id' }, call: cancelCalibration }
+	devices: { call: getDevices },
+	device: { args: { id: 'id' }, call: getDevice },
+	reset: { args: { id: 'id' }, call: resetDevice },
+	setflatrate: { args: { id: 'id', enabled: 1 }, call: setFlatrate },
+	setpause: { args: { id: 'id', enabled: 1 }, call: setPause },
+	settings: { call: getSettings },
+	status: { call: getDaemonStatus },
+	validate: { args: { schedules: [] }, call: validateSchedules },
+	startcalibration: { args: { id: 'id', duration: 1800 }, call: startCalibration },
+	startcalibrationphase2: { args: { id: 'id' }, call: startCalibrationPhase2 },
+	getcalibration: { args: { id: 'id' }, call: getCalibration },
+	applycalibration: { args: { id: 'id' }, call: applyCalibration },
+	cancelcalibration: { args: { id: 'id' }, call: cancelCalibration }
 };
 
 return { 'luci.device-timer': methods };

@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.5.0] - 2026-04-10
+
+### Changed
+- Update installation instructions to use browser download and upload instead of direct URL
+
+### Fixed
+- Fix `apk info` showing default LuCI webpage URL instead of project repository URL
+- Fix `E()` child-array arguments in status page
+
+### Security
+- Add try/catch around all JSON parsing in state, calibration, firewall and rpcd
+- Set umask 0077 and chmod 0700 for daemon temp directory
+- Atomic PID file writes to prevent partial reads
+- Validate device_id at monitor entry point
+- Add term_timeout, PID validation and core dump limit in init script
+- Warn on active flow offloading (bypasses nftables counters)
+
 ## [1.4.1] - 2026-03-10
 
 ### Fixed
@@ -27,6 +44,10 @@
 
 ## [1.3.0] - 2026-03-03
 
+### Changed
+- Use nft chain priority -10 instead of 0 to ensure traffic counting before firewall4 evaluation
+- Create nft monitoring tables for all enabled devices regardless of schedule state
+
 ### Fixed
 - Fix blocked devices retaining internet access through established TCP connections
 - Fix conntrack flush unavailable for devices without active schedule (no_schedule, outside_window)
@@ -34,10 +55,6 @@
 - Fix conntrack flush queue not drained when no firewall reload occurred
 - Fix calibration threshold apply bypassing standard save & apply workflow
 - Fix calibration success notification hidden behind edit modal
-
-### Changed
-- Use nft chain priority -10 instead of 0 to ensure traffic counting before firewall4 evaluation
-- Create nft monitoring tables for all enabled devices regardless of schedule state
 
 ## [1.2.1] - 2026-02-28
 
@@ -50,6 +67,9 @@
 ### Added
 - Two-phase calibration: separate idle and usage measurement with geometric mean threshold
 - Pause API to temporarily block device internet access (overrides flatrate)
+
+### Changed
+- Update api-reference with calibration and pause endpoints
 
 ### Fixed
 - Reset usage on schedule window change to prevent stale usage blocking new windows
@@ -69,9 +89,6 @@
 - Use batch commit pattern in orphaned resource cleanup
 - Prevent potential rpcd crash from function calls in uci.foreach
 
-### Documentation
-- Update api-reference with calibration and pause endpoints
-
 ## [1.1.0] - 2026-02-25
 
 ### Added
@@ -85,6 +102,11 @@
 
 ## [1.0.3] - 2026-02-24
 
+### Changed
+- Batch firewall UCI commits per cycle instead of per device
+- Remove redundant config reload in schedule evaluation
+- Fix api-reference terminology and add missing field descriptions
+
 ### Fixed
 - Config reload no longer causes state loss (signal-based instead of restart)
 - RPC commands no longer lost under concurrent access
@@ -95,13 +117,6 @@
 - prerm firewall rule cleanup matching too broadly
 - Default state version mismatch
 
-### Changed
-- Batch firewall UCI commits per cycle instead of per device
-- Remove redundant config reload in schedule evaluation
-
-### Documentation
-- Fix api-reference terminology and add missing field descriptions
-
 ## [1.0.2] - 2026-02-23
 
 ### Fixed
@@ -109,17 +124,17 @@
 
 ## [1.0.1] - 2026-02-15
 
-### Fixed
-- Firewall rules now apply to all zones (`src='*'` instead of `src='lan'`)
-- Fix broken prerm script causing "Command failed" during install/remove
-- Remove redundant stop/start calls in prerm/postinst (handled by OpenWrt defaults)
-
 ### Added
 - Auto-register opkg package feed on install for metadata and updates
 
 ### Changed
 - Use `LUCI_MAINTAINER` and `LUCI_DESCRIPTION` for proper luci.mk integration
 - Add conffiles block to preserve config on upgrade
+
+### Fixed
+- Firewall rules now apply to all zones (`src='*'` instead of `src='lan'`)
+- Fix broken prerm script causing "Command failed" during install/remove
+- Remove redundant stop/start calls in prerm/postinst (handled by OpenWrt defaults)
 - Fix setup_build_env.sh: shallow base feed clone, pre-compile Lua headers
 
 ## [1.0.0] - 2026-02-14

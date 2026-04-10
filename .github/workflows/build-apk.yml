@@ -10,9 +10,9 @@ permissions:
   contents: write
 
 env:
-  SDK_VERSION: "25.12.0"
+  SDK_VERSION: "25.12.2"
   SDK_TARGET: "bcm27xx-bcm2711"
-  SDK_URL: "https://downloads.openwrt.org/releases/25.12.0/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.0-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
+  SDK_URL: "https://downloads.openwrt.org/releases/25.12.2/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.2-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
   PACKAGE_NAME: "luci-app-device-timer"
   PAGES_URL: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
@@ -78,8 +78,12 @@ jobs:
           make defconfig
           make package/lua/compile V=s
 
-      - name: Replace __PAGES_URL__ placeholder
-        run: sed -i "s|__PAGES_URL__|${PAGES_URL}|g" src/$PACKAGE_NAME/Makefile
+      - name: Replace placeholders
+        env:
+          REPO_URL: "${{ github.server_url }}/${{ github.repository }}"
+        run: |
+          sed -i "s|__PAGES_URL__|${PAGES_URL}|g" src/$PACKAGE_NAME/Makefile
+          sed -i "s|__REPO_URL__|${REPO_URL}|g" src/$PACKAGE_NAME/Makefile
 
       - name: Copy package and compile
         run: |

@@ -16,9 +16,9 @@ stages:
   - pages
 
 variables:
-  SDK_VERSION: "25.12.0"
+  SDK_VERSION: "25.12.2"
   SDK_TARGET: "bcm27xx-bcm2711"
-  SDK_URL: "https://downloads.openwrt.org/releases/25.12.0/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.0-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
+  SDK_URL: "https://downloads.openwrt.org/releases/25.12.2/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.2-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
   PACKAGE_NAME: "luci-app-device-timer"
 
 build:
@@ -68,8 +68,9 @@ build:
         make package/lua/compile V=s
         cd ..
       fi
-    # Replace __PAGES_URL__ placeholder with actual Pages URL
+    # Replace placeholders with actual URLs
     - sed -i "s|__PAGES_URL__|${CI_PAGES_URL}|g" src/$PACKAGE_NAME/Makefile
+    - sed -i "s|__REPO_URL__|${CI_PROJECT_URL}|g" src/$PACKAGE_NAME/Makefile
     - |
       rm -rf openwrt-sdk/package/$PACKAGE_NAME
       rm -rf openwrt-sdk/tmp

@@ -42,15 +42,12 @@ var callCancelCalibration = rpc.declare({
 	params: ['id']
 });
 
-// Module-level store for device data (accessible from option methods)
 var deviceDataStore = {};
 var activeCalibrationSectionId = null;
 var calibrationActionTime = {};
 
-// Format bytes to human-readable string
 function formatBytes(bytes) {
 	if (bytes < 1024 * 1024) {
-		// Minimum 1K, round up
 		var kb = Math.ceil(bytes / 1024);
 		if (kb < 1) kb = 1;
 		return kb + ' K';
@@ -59,8 +56,7 @@ function formatBytes(bytes) {
 	}
 }
 
-// Format bytes to UCI threshold string (e.g., "8K", "1M")
-// Must match formatBytes() logic so displayed recommendation equals applied value
+/* Must match formatBytes() logic so displayed recommendation equals applied value */
 function formatThresholdUCI(bytes) {
 	if (bytes < 1024 * 1024) {
 		var kb = Math.ceil(bytes / 1024);
@@ -70,7 +66,6 @@ function formatThresholdUCI(bytes) {
 	return Math.round(bytes / (1024 * 1024)) + 'M';
 }
 
-// Parse time string "HH:MM" to minutes since midnight
 function parseTimeToMinutes(timeStr) {
 	if (!timeStr) return null;
 	var parts = timeStr.split(':');
@@ -82,7 +77,6 @@ function parseTimeToMinutes(timeStr) {
 	return hours * 60 + mins;
 }
 
-// Check if two time ranges overlap (handles overnight windows)
 function timeRangesOverlap(start1, end1, start2, end2) {
 	var ranges1 = [];
 	var ranges2 = [];
@@ -113,7 +107,6 @@ function timeRangesOverlap(start1, end1, start2, end2) {
 	return false;
 }
 
-// Validate schedule list for overlaps (exported for testing)
 function validateScheduleOverlaps(schedules) {
 	if (!schedules || !schedules.length) {
 		return { valid: true };
@@ -162,14 +155,12 @@ function validateScheduleOverlaps(schedules) {
 	return { valid: true };
 }
 
-// Export for testing (accessible via browser console)
 window.deviceTimerValidation = {
 	parseTimeToMinutes: parseTimeToMinutes,
 	timeRangesOverlap: timeRangesOverlap,
 	validateScheduleOverlaps: validateScheduleOverlaps
 };
 
-// Build a calibration status badge element
 function renderCalibrationBadge(cal) {
 	if (cal.status === 'phase1_running')
 		return E('span', { 'class': 'label notice' }, _('Phase 1: Idle Measurement'));
@@ -182,12 +173,11 @@ function renderCalibrationBadge(cal) {
 	if (cal.status === 'error')
 		return E('span', {}, [
 			E('span', { 'class': 'label danger' }, _('Error')),
-			E('span', { 'style': 'margin-left:0.5em' }, cal.error_message || _('Unknown error'))
+			E('span', { 'style': 'margin-left:0.5em' }, [cal.error_message || _('Unknown error')])
 		]);
 	return E('span', { 'class': 'label' }, _('Idle'));
 }
 
-// Update calibration UI in open modal during polling
 function updateCalibrationInModal() {
 	if (!document.querySelector('.cbi-modal')) {
 		activeCalibrationSectionId = null;
@@ -202,11 +192,9 @@ function updateCalibrationInModal() {
 	var calData = deviceDataStore[sid].calibration;
 	var cal = (calData && calData.status) ? calData : { status: 'idle' };
 
-	// Update status badge
 	var statusField = document.getElementById('cal-status-field');
 	if (statusField) dom.content(statusField, renderCalibrationBadge(cal));
 
-	// Row visibility
 	var showPhase1 = (cal.status === 'phase1_running');
 	var showPhase2 = (cal.status === 'phase2_running');
 	var showPhase1Results = (cal.status === 'phase1_done');
@@ -232,7 +220,6 @@ function updateCalibrationInModal() {
 		if (el) el.style.display = rows[ids[i]] ? '' : 'none';
 	}
 
-	// Update phase 1 progress
 	if (showPhase1) {
 		var p1 = document.getElementById('cal-phase1-content');
 		if (p1) {
@@ -249,7 +236,6 @@ function updateCalibrationInModal() {
 		}
 	}
 
-	// Update phase 2 progress
 	if (showPhase2) {
 		var p2 = document.getElementById('cal-phase2-content');
 		if (p2) {
@@ -266,7 +252,6 @@ function updateCalibrationInModal() {
 		}
 	}
 
-	// Update phase 1 results
 	if (showPhase1Results) {
 		var p1r = document.getElementById('cal-phase1-results-content');
 		if (p1r) {
@@ -279,7 +264,6 @@ function updateCalibrationInModal() {
 		}
 	}
 
-	// Update completed results
 	if (showResults) {
 		var idleField = document.getElementById('cal-idle-stats-content');
 		if (idleField) {
@@ -315,7 +299,6 @@ function updateCalibrationInModal() {
 		}
 	}
 
-	// Update action button text
 	var actionBtn = document.getElementById('cal-action-btn');
 	if (actionBtn) {
 		var newTitle;
@@ -329,8 +312,7 @@ function updateCalibrationInModal() {
 	}
 }
 
-// Calibration Tab widget — extends DummyValue for stable renderWidget
-// Pattern from dhcp.js CBILeaseStatus: renderWidget in prototype, not instance
+// Calibration Tab widget (pattern from dhcp.js CBILeaseStatus)
 var CBICalibrationUI = form.DummyValue.extend({
 	__name__: 'CBI.CalibrationUI',
 
@@ -359,7 +341,6 @@ var CBICalibrationUI = form.DummyValue.extend({
 			]);
 		}
 
-		// Action button title
 		var actionTitle;
 		if (status === 'phase1_running' || status === 'phase2_running')
 			actionTitle = _('Cancel Calibration');
@@ -368,7 +349,6 @@ var CBICalibrationUI = form.DummyValue.extend({
 		else
 			actionTitle = _('Start Idle Measurement');
 
-		// Action button handler
 		var actionBtn = E('button', {
 			'class': 'btn cbi-button-action', 'id': 'cal-action-btn',
 			'click': function() {
@@ -383,7 +363,7 @@ var CBICalibrationUI = form.DummyValue.extend({
 								deviceDataStore[section_id].calibration = { status: 'idle' };
 							updateCalibrationInModal();
 						} else {
-							ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
+							ui.addNotification(null, E('p', {}, [result.error || _('Failed')]), 'error');
 						}
 					}).catch(function() {
 						ui.addNotification(null, E('p', _('Failed')), 'error');
@@ -407,7 +387,7 @@ var CBICalibrationUI = form.DummyValue.extend({
 								};
 							updateCalibrationInModal();
 						} else {
-							ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
+							ui.addNotification(null, E('p', {}, [result.error || _('Failed')]), 'error');
 						}
 					}).catch(function() {
 						ui.addNotification(null, E('p', _('Failed')), 'error');
@@ -433,7 +413,7 @@ var CBICalibrationUI = form.DummyValue.extend({
 								};
 							updateCalibrationInModal();
 						} else {
-							ui.addNotification(null, E('p', result.error || _('Failed')), 'error');
+							ui.addNotification(null, E('p', {}, [result.error || _('Failed')]), 'error');
 						}
 					}).catch(function() {
 						ui.addNotification(null, E('p', _('Failed')), 'error');
@@ -442,7 +422,6 @@ var CBICalibrationUI = form.DummyValue.extend({
 			}
 		}, actionTitle);
 
-		// Apply button handler — sets form field directly (standard save & apply workflow)
 		var applyBtn = E('button', {
 			'class': 'btn cbi-button-action', 'id': 'cal-apply-btn',
 			'click': function() {
@@ -453,7 +432,6 @@ var CBICalibrationUI = form.DummyValue.extend({
 
 				var thresholdStr = formatThresholdUCI(calState.result_recommended);
 
-				// Update form field in Advanced tab (form save handles UCI write)
 				var input = document.getElementById(
 					'widget.cbid.device_timer.' + section_id + '.traffic_threshold');
 				if (input) {
@@ -463,7 +441,6 @@ var CBICalibrationUI = form.DummyValue.extend({
 					uci.set('device_timer', section_id, 'traffic_threshold', thresholdStr);
 				}
 
-				// Clear calibration state via backend
 				calibrationActionTime[section_id] = Date.now();
 				callCancelCalibration(section_id).catch(function() {});
 
@@ -675,7 +652,6 @@ return view.extend({
 			var row = document.querySelector('tr[data-sid="' + device.id + '"]');
 			if (!row) return;
 
-			// Update Usage column
 			var usageCell = row.querySelector('td[data-name="_usage"]');
 			if (usageCell) {
 				var usageText = !device.has_schedule_today ? '-' :
@@ -683,7 +659,6 @@ return view.extend({
 				dom.content(usageCell, usageText);
 			}
 
-			// Update Remaining column
 			var remainingCell = row.querySelector('td[data-name="_remaining"]');
 			if (remainingCell) {
 				var remainingText = '-';
@@ -699,14 +674,12 @@ return view.extend({
 				dom.content(remainingCell, remainingText);
 			}
 
-			// Update Status column
 			var statusCell = row.querySelector('td[data-name="_status"]');
 			if (statusCell) {
 				var status = device.status || 'unknown';
 				dom.content(statusCell, statusLabels[status] || status);
 			}
 
-			// Update IP column (can change dynamically)
 			var ipCell = row.querySelector('td[data-name="_ip"]');
 			if (ipCell) {
 				dom.content(ipCell, device.ip || '-');
@@ -721,13 +694,11 @@ return view.extend({
 		var calibrations = data[4] || [];
 		var self = this;
 
-		// Merge calibration data into devices
 		var calMap = {};
 		calibrations.forEach(function(item) {
 			if (item && item.cal) calMap[item.id] = item.cal;
 		});
 
-		// Populate module-level store for option method access
 		devices.forEach(function(d) {
 			if (calMap[d.id]) d.calibration = calMap[d.id];
 			deviceDataStore[d.id] = d;
@@ -738,7 +709,6 @@ return view.extend({
 		m = new form.Map('device_timer', _('Device Timer'),
 			_('Monitor and manage device usage times.'));
 
-		// Status Header Section
 		s = m.section(form.NamedSection, 'status_header', 'status_header');
 		s.render = L.bind(function() {
 			return E('div', { 'class': 'cbi-section' }, [
@@ -747,7 +717,6 @@ return view.extend({
 			]);
 		}, this);
 
-		// Device Section
 		s = m.section(form.GridSection, 'device', _('Monitored Devices'));
 		s.anonymous = true;
 		s.addremove = true;
@@ -764,7 +733,6 @@ return view.extend({
 		s.tab('advanced', _('Advanced'));
 		s.tab('calibration', _('Calibration'));
 
-		// Table columns (visible in grid)
 		o = s.taboption('general', form.Flag, 'enabled', _('Enabled'));
 		o.editable = true;
 		o.default = '1';
@@ -782,7 +750,6 @@ return view.extend({
 		};
 		o.write = function() {};
 
-		// MAC column (from config, displayed in table)
 		o = s.option(form.DummyValue, '_mac', _('MAC'));
 		o.modalonly = false;
 		o.textvalue = function(section_id) {
@@ -790,7 +757,6 @@ return view.extend({
 			return device.mac || '-';
 		};
 
-		// IP column (auto-resolved from MAC, displayed in table)
 		o = s.option(form.DummyValue, '_ip', _('IP'));
 		o.modalonly = false;
 		o.textvalue = function(section_id) {
@@ -798,7 +764,6 @@ return view.extend({
 			return device.ip || '-';
 		};
 
-		// Dynamic status columns (read-only, from RPC data)
 		o = s.option(form.DummyValue, '_usage', _('Usage'));
 		o.modalonly = false;
 		o.textvalue = function(section_id) {
@@ -836,7 +801,6 @@ return view.extend({
 			return labels[status] || status;
 		};
 
-		// Modal-only fields
 		o = s.taboption('general', form.Value, 'mac', _('MAC Address'),
 			_('Required for reliable device blocking.'));
 		o.datatype = 'macaddr';
@@ -902,7 +866,6 @@ return view.extend({
 		o = s.taboption('calibration', CBICalibrationUI, '_calibration_ui', ' ');
 		o.modalonly = true;
 
-		// Polling for live updates
 		poll.add(L.bind(function() {
 			var deviceIds = Object.keys(deviceDataStore);
 

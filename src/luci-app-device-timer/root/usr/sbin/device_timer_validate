@@ -8,8 +8,8 @@ import { cursor } from 'uci';
 const validation = call(loadfile('/usr/share/ucode/device_timer/validate.uc'));
 
 function shellquote(s) {
-    if (s == null) s = '';
-    return "'" + replace(s, "'", "'\\''") + "'";
+	if (s == null) s = '';
+	return "'" + replace(s, "'", "'\\''") + "'";
 }
 
 // Main validation
@@ -17,27 +17,27 @@ const uci = cursor();
 let hasErrors = false;
 
 uci.foreach('device_timer', 'device', (s) => {
-    const deviceId = s['.name'];
-    // Get schedule list - must be an array (uci add_list), not a string (uci set)
-    // type() returns 'array' for arrays, 'string' for strings
-    let scheduleList = [];
-    if (s.schedule && type(s.schedule) === 'array') {
-        scheduleList = s.schedule;
-    } else if (s.schedule && type(s.schedule) === 'string') {
-        // Single schedule entry created with uci set instead of add_list
-        scheduleList = [s.schedule];
-    }
+	const deviceId = s['.name'];
+	// Get schedule list - must be an array (uci add_list), not a string (uci set)
+	// type() returns 'array' for arrays, 'string' for strings
+	let scheduleList = [];
+	if (s.schedule && type(s.schedule) === 'array') {
+		scheduleList = s.schedule;
+	} else if (s.schedule && type(s.schedule) === 'string') {
+		// Single schedule entry created with uci set instead of add_list
+		scheduleList = [s.schedule];
+	}
 
-    if (length(scheduleList) > 0) {
-        const result = validation.validateScheduleList(scheduleList);
-        if (!result.valid) {
-            print('device_timer: Config error for ' + deviceId + ': ' + result.error + '\n');
-            // system() is global built-in, NOT imported from fs
-            // shellquote prevents command injection via schedule entry values
-            system('logger -t device_timer ' + shellquote('Config validation failed for ' + deviceId + ': ' + result.error));
-            hasErrors = true;
-        }
-    }
+	if (length(scheduleList) > 0) {
+		const result = validation.validateScheduleList(scheduleList);
+		if (!result.valid) {
+			print('device_timer: Config error for ' + deviceId + ': ' + result.error + '\n');
+			// system() is global built-in, NOT imported from fs
+			// shellquote prevents command injection via schedule entry values
+			system('logger -t device_timer ' + shellquote('Config validation failed for ' + deviceId + ': ' + result.error));
+			hasErrors = true;
+		}
+	}
 });
 
 exit(hasErrors ? 1 : 0);

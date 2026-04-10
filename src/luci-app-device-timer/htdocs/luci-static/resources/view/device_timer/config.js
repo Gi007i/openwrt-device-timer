@@ -14,7 +14,6 @@ return view.extend({
 		m = new form.Map('device_timer', _('Device Timer Configuration'),
 			_('Global settings for device usage monitoring.'));
 
-		// Global Settings Section
 		s = m.section(form.TypedSection, 'global', _('Global Settings'));
 		s.anonymous = true;
 		s.addremove = false;

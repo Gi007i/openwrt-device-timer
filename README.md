@@ -22,30 +22,16 @@ LuCI app for monitoring and limiting the usage time of network devices. Automati
 
 ## Installation
 
-The package is available from two mirrors:
-
-| Mirror | Feed URL |
-|---|---|
-| GitHub | `https://Gi007i.github.io/openwrt-device-timer/packages/packages.adb` |
-| GitLab | `https://Gi007i.gitlab.io/openwrt-device-timer/packages/packages.adb` |
-
 ### Via LuCI Web Interface
 
-1. In LuCI go to **System → Software**
-2. Under **Download and install package**, paste one of these URLs and click **OK**:
-   ```
-   https://Gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer-1.4.1-r1.apk
-   ```
-   ```
-   https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-app-device-timer-1.4.1-r1.apk
-   ```
-3. Repeat for the German translation:
-   ```
-   https://Gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.4.1-r1.apk
-   ```
-   ```
-   https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.4.1-r1.apk
-   ```
+1. Download the package file to your computer:
+   - [GitHub mirror](https://Gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer-1.5.0-r1.apk)
+   - [GitLab mirror](https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-app-device-timer-1.5.0-r1.apk)
+2. In LuCI go to **System → Software**
+3. Click **Upload Package...** and select the downloaded `.apk` file
+4. Repeat for the German translation:
+   - [GitHub mirror](https://Gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.5.0-r1.apk)
+   - [GitLab mirror](https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.5.0-r1.apk)
 
 This installs the package, the feed signing key and registers the package feed automatically. Future updates are available through **System → Software → Updates**.
 
