@@ -22,22 +22,27 @@ LuCI app for monitoring and limiting the usage time of network devices. Automati
 
 ## Installation
 
-### Via LuCI Web Interface
+Packages are distributed through a signed apk feed. Run on the router via SSH, using one mirror:
 
-1. Download the package file to your computer:
-   - [GitHub mirror](https://Gi007i.github.io/openwrt-device-timer/packages/luci-app-device-timer-1.5.0-r1.apk)
-   - [GitLab mirror](https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-app-device-timer-1.5.0-r1.apk)
-2. In LuCI go to **System → Software**
-3. Click **Upload Package...** and select the downloaded `.apk` file
-4. Repeat for the German translation:
-   - [GitHub mirror](https://Gi007i.github.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.5.0-r1.apk)
-   - [GitLab mirror](https://Gi007i.gitlab.io/openwrt-device-timer/packages/luci-i18n-device-timer-de-1.5.0-r1.apk)
+```sh
+# GitHub mirror
+wget -qO- https://Gi007i.github.io/openwrt-device-timer/install.sh | sh
+```
 
-This installs the package, the feed signing key and registers the package feed automatically. Future updates are available through **System → Software → Updates**.
+```sh
+# GitLab mirror
+wget -qO- https://Gi007i.gitlab.io/openwrt-device-timer/install.sh | sh
+```
 
-### Via SSH
+The [install script](install.sh) adds the signing key and the package feed, then installs the app and the German translation.
 
-Choose one mirror and run:
+Updates are available through `apk upgrade` or in LuCI under **System → Software → Updates**.
+
+Installing via **Upload Package...** in LuCI is not supported: apk only accepts packages signed by a key the router already trusts.
+
+### Manual Installation
+
+Add the signing key and the package feed of one mirror:
 
 ```sh
 # GitHub mirror
@@ -51,12 +56,12 @@ wget -O /etc/apk/keys/device-timer.pem https://Gi007i.gitlab.io/openwrt-device-t
 echo 'https://Gi007i.gitlab.io/openwrt-device-timer/packages/packages.adb' > /etc/apk/repositories.d/device-timer.list
 ```
 
+Install the package and the German translation:
+
 ```sh
 apk update
 apk add luci-app-device-timer luci-i18n-device-timer-de
 ```
-
-Future updates are available through `apk upgrade`.
 
 ## Configuration
 
@@ -90,7 +95,7 @@ The device timer exposes a ubus JSON-RPC interface for programmatic access.
 apk del luci-app-device-timer luci-i18n-device-timer-de
 ```
 
-Configuration files are preserved and can be removed manually:
+The signing key and the feed entry are removed together with the package. Configuration files are preserved and can be removed manually:
 
 ```sh
 rm /etc/config/device_timer

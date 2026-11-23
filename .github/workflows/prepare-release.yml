@@ -26,8 +26,6 @@ jobs:
 
       - name: Prepare release commit
         env:
-          GITHUB_PAGES_URL: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          GITLAB_PAGES_URL: "https://${{ github.repository_owner }}.gitlab.io/${{ github.event.repository.name }}"
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
@@ -36,10 +34,6 @@ jobs:
           # Squash-merge
           git checkout main
           git merge --squash "origin/${GITHUB_REF_NAME}"
-          # Replace placeholders in README
-          sed -i "s|__GITHUB_PAGES_URL__|${GITHUB_PAGES_URL}|g" README.md
-          sed -i "s|__GITLAB_PAGES_URL__|${GITLAB_PAGES_URL}|g" README.md
-          sed -i "s|__VERSION__|${VERSION}|g" README.md
           # Set PKG_VERSION in Makefile
           sed -i "s|^PKG_VERSION:=.*|PKG_VERSION:=${VERSION}|" src/luci-app-device-timer/Makefile
           # Check DO_RELEASE flag
@@ -52,13 +46,13 @@ jobs:
             git push origin main
             git push origin "v${VERSION}"
             # Cross-push to GitLab
-            git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitLab push (main) failed"
-            git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" "v${VERSION}" || echo "WARNING: GitLab push (tag) failed"
+            git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" main
+            git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" "v${VERSION}"
           else
             # Merge only: no tag, no build
             git commit -m "feat: release v${VERSION} device timer package"
             git push origin main
-            git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitLab push (main) failed"
+            git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git" main
           fi
           # Delete release branch
-          git push origin --delete "${GITHUB_REF_NAME}" || true
+          git push origin --delete "${GITHUB_REF_NAME}"

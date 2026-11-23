@@ -1,6 +1,6 @@
 include $(TOPDIR)/rules.mk
 
-PKG_VERSION:=1.5.0
+PKG_VERSION:=1.5.2
 PKG_RELEASE:=1
 DO_RELEASE:=1
 PKG_PO_VERSION:=$(PKG_VERSION)-r$(PKG_RELEASE)
@@ -27,9 +27,8 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	rm -rf /tmp/luci-modulecache/ 2>/dev/null
 	/etc/init.d/rpcd reload 2>/dev/null
 
-	# Register package feed for updates and metadata
+	# Register package feed for updates
 	echo "__PAGES_URL__/packages/packages.adb" > /etc/apk/repositories.d/device-timer.list
-	apk update 2>/dev/null
 
 	# Note: enable/start and luci-indexcache handled by default_postinst
 fi

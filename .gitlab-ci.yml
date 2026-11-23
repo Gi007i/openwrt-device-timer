@@ -16,9 +16,9 @@ stages:
   - pages
 
 variables:
-  SDK_VERSION: "25.12.2"
+  SDK_VERSION: "25.12.6"
   SDK_TARGET: "bcm27xx-bcm2711"
-  SDK_URL: "https://downloads.openwrt.org/releases/25.12.2/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.2-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
+  SDK_URL: "https://downloads.openwrt.org/releases/25.12.6/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.6-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
   PACKAGE_NAME: "luci-app-device-timer"
 
 build:
@@ -36,7 +36,7 @@ build:
     - >-
       apt-get install -y build-essential clang flex bison g++ gawk
       gettext git libncurses-dev libssl-dev python3-setuptools rsync
-      swig unzip zlib1g-dev file wget libelf-dev zstd
+      swig unzip zlib1g-dev file wget libelf-dev zstd shellcheck
   script:
     - |
       if [ -n "$CI_COMMIT_TAG" ]; then
@@ -68,9 +68,15 @@ build:
         make package/lua/compile V=s
         cd ..
       fi
+    - shellcheck install.sh
     # Replace placeholders with actual URLs
-    - sed -i "s|__PAGES_URL__|${CI_PAGES_URL}|g" src/$PACKAGE_NAME/Makefile
+    - sed -i "s|__PAGES_URL__|${CI_PAGES_URL}|g" src/$PACKAGE_NAME/Makefile install.sh
     - sed -i "s|__REPO_URL__|${CI_PROJECT_URL}|g" src/$PACKAGE_NAME/Makefile
+    - |
+      if grep -n '__[A-Z_]\+__' src/$PACKAGE_NAME/Makefile install.sh; then
+        echo "ERROR: unreplaced placeholders"
+        exit 1
+      fi
     - |
       rm -rf openwrt-sdk/package/$PACKAGE_NAME
       rm -rf openwrt-sdk/tmp
@@ -81,22 +87,18 @@ build:
     - |
       mkdir -p artifacts
       find openwrt-sdk/bin/packages/ -name "*device-timer*.apk" -exec cp {} artifacts/ \;
+      cp install.sh artifacts/
       echo "Built packages:"
       ls -lh artifacts/
     # Generate signed package index
     - |
+      [ -n "$APK_SIGNING_KEY" ] || { echo "ERROR: APK_SIGNING_KEY not set"; exit 1; }
       APK="openwrt-sdk/staging_dir/host/bin/apk"
       cd artifacts
-      if [ -n "$APK_SIGNING_KEY" ]; then
-        printf '%s\n' "$APK_SIGNING_KEY" > /tmp/apk-key.pem
-        chmod 600 /tmp/apk-key.pem
-        ../$APK mkndx --allow-untrusted --sign /tmp/apk-key.pem -o packages.adb *.apk
-        rm -f /tmp/apk-key.pem
-        echo "--- Signed package index generated ---"
-      else
-        echo "WARNING: APK_SIGNING_KEY not set, creating unsigned index"
-        ../$APK mkndx --allow-untrusted -o packages.adb *.apk
-      fi
+      umask 077
+      printf '%s\n' "$APK_SIGNING_KEY" > /tmp/apk-key.pem
+      ../$APK mkndx --allow-untrusted --sign-key /tmp/apk-key.pem -o packages.adb *.apk
+      rm -f /tmp/apk-key.pem
       ls -lh packages.adb
   artifacts:
     paths:
@@ -146,11 +148,8 @@ pages:
     - cp artifacts/*.apk public/packages/
     - cp artifacts/packages.adb public/packages/
     # Copy public signing key
-    - |
-      KEY_DIR="src/${PACKAGE_NAME}/root/etc/apk/keys"
-      if [ -d "$KEY_DIR" ]; then
-        cp "$KEY_DIR"/* public/keys/
-      fi
+    - cp "src/${PACKAGE_NAME}/root/etc/apk/keys/device-timer.pem" public/keys/
+    - cp artifacts/install.sh public/
   artifacts:
     paths:
       - public
@@ -173,7 +172,7 @@ sync:
       GITHUB_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git"
       git remote add github "${GITHUB_URL}"
       git fetch origin main --tags
-      git fetch github main --tags || { echo "WARNING: GitHub unreachable"; exit 0; }
+      git fetch github main --tags
 
       # Fast-forward main if behind (explicit origin to avoid ambiguity with github/main)
       git checkout -b main origin/main
@@ -190,11 +189,12 @@ sync:
         exit 1
       fi
 
-      # Push missing tags (non-fatal: individual failures must not abort sync)
+      # Push missing tags
       GITLAB_TAGS=$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' || true)
       for tag in $(git tag -l 'v*'); do
         if ! echo "$GITLAB_TAGS" | grep -qx "$tag"; then
-          git push origin "$tag" && echo "Synced tag $tag" || echo "WARNING: Failed to push tag $tag"
+          git push origin "$tag"
+          echo "Synced tag $tag"
         fi
       done
       echo "Sync complete"
@@ -224,11 +224,6 @@ prepare-release:
       git fetch origin main
       git checkout main
       git merge --squash "origin/${CI_COMMIT_BRANCH}"
-      # Replace placeholders in README
-      GITHUB_PAGES_URL="https://Gi007i.github.io/openwrt-device-timer"
-      sed -i "s|__GITHUB_PAGES_URL__|${GITHUB_PAGES_URL}|g" README.md
-      sed -i "s|__GITLAB_PAGES_URL__|${CI_PAGES_URL}|g" README.md
-      sed -i "s|__VERSION__|${VERSION}|g" README.md
       # Set PKG_VERSION in Makefile
       sed -i "s|^PKG_VERSION:=.*|PKG_VERSION:=${VERSION}|" src/luci-app-device-timer/Makefile
       # Check DO_RELEASE flag
@@ -241,13 +236,13 @@ prepare-release:
         git push origin main
         git push origin "${TAG}"
         # Cross-push to GitHub
-        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitHub push (main) failed"
-        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" "${TAG}" || echo "WARNING: GitHub push (tag) failed"
+        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" main
+        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" "${TAG}"
       else
         # Merge only: no tag, no build
         git commit -m "feat: release v${VERSION} device timer package"
         git push origin main
-        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" main || echo "WARNING: GitHub push (main) failed"
+        git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Gi007i/openwrt-device-timer.git" main
       fi
       # Delete release branch
-      git push origin --delete "${CI_COMMIT_BRANCH}" || true
+      git push origin --delete "${CI_COMMIT_BRANCH}"

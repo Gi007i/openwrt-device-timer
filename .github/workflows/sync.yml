@@ -23,7 +23,7 @@ jobs:
         run: |
           GITLAB_URL="https://oauth2:${GITLAB_TOKEN}@gitlab.com/Gi007i/openwrt-device-timer.git"
           git remote add gitlab "${GITLAB_URL}"
-          git fetch gitlab main --tags || { echo "WARNING: GitLab unreachable"; exit 0; }
+          git fetch gitlab main --tags
 
           # Fast-forward main if behind
           git checkout main
@@ -40,11 +40,12 @@ jobs:
             exit 1
           fi
 
-          # Push missing tags (non-fatal: individual failures must not abort sync)
+          # Push missing tags
           ORIGIN_TAGS=$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' || true)
           for tag in $(git tag -l 'v*'); do
             if ! echo "$ORIGIN_TAGS" | grep -qx "$tag"; then
-              git push origin "$tag" && echo "Synced tag $tag" || echo "WARNING: Failed to push tag $tag"
+              git push origin "$tag"
+              echo "Synced tag $tag"
             fi
           done
           echo "Sync complete"

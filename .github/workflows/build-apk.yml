@@ -10,9 +10,9 @@ permissions:
   contents: write
 
 env:
-  SDK_VERSION: "25.12.2"
+  SDK_VERSION: "25.12.6"
   SDK_TARGET: "bcm27xx-bcm2711"
-  SDK_URL: "https://downloads.openwrt.org/releases/25.12.2/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.2-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
+  SDK_URL: "https://downloads.openwrt.org/releases/25.12.6/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.6-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
   PACKAGE_NAME: "luci-app-device-timer"
   PAGES_URL: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
@@ -78,12 +78,19 @@ jobs:
           make defconfig
           make package/lua/compile V=s
 
+      - name: Lint install script
+        run: shellcheck install.sh
+
       - name: Replace placeholders
         env:
           REPO_URL: "${{ github.server_url }}/${{ github.repository }}"
         run: |
-          sed -i "s|__PAGES_URL__|${PAGES_URL}|g" src/$PACKAGE_NAME/Makefile
+          sed -i "s|__PAGES_URL__|${PAGES_URL}|g" src/$PACKAGE_NAME/Makefile install.sh
           sed -i "s|__REPO_URL__|${REPO_URL}|g" src/$PACKAGE_NAME/Makefile
+          if grep -n '__[A-Z_]\+__' src/$PACKAGE_NAME/Makefile install.sh; then
+            echo "ERROR: unreplaced placeholders"
+            exit 1
+          fi
 
       - name: Copy package and compile
         run: |
@@ -97,11 +104,9 @@ jobs:
         run: |
           mkdir -p artifacts/keys
           find ~/openwrt-sdk/bin/packages/ -name "*device-timer*.apk" -exec cp {} artifacts/ \;
-          # Include public signing key for feed deployment
-          KEY_DIR="src/$PACKAGE_NAME/root/etc/apk/keys"
-          if [ -d "$KEY_DIR" ]; then
-            cp "$KEY_DIR"/* artifacts/keys/ 2>/dev/null || true
-          fi
+          # Public signing key for feed deployment
+          cp "src/$PACKAGE_NAME/root/etc/apk/keys/device-timer.pem" artifacts/keys/
+          cp install.sh artifacts/
           echo "Built packages:"
           ls -lh artifacts/
 
@@ -109,18 +114,13 @@ jobs:
         env:
           APK_SIGNING_KEY: ${{ secrets.APK_SIGNING_KEY }}
         run: |
+          [ -n "$APK_SIGNING_KEY" ] || { echo "ERROR: APK_SIGNING_KEY not set"; exit 1; }
           APK="$HOME/openwrt-sdk/staging_dir/host/bin/apk"
           cd artifacts
-          if [ -n "$APK_SIGNING_KEY" ]; then
-            printf '%s\n' "$APK_SIGNING_KEY" > /tmp/apk-key.pem
-            chmod 600 /tmp/apk-key.pem
-            $APK mkndx --allow-untrusted --sign /tmp/apk-key.pem -o packages.adb *.apk
-            rm -f /tmp/apk-key.pem
-            echo "--- Signed package index generated ---"
-          else
-            echo "WARNING: APK_SIGNING_KEY not set, creating unsigned index"
-            $APK mkndx --allow-untrusted -o packages.adb *.apk
-          fi
+          umask 077
+          printf '%s\n' "$APK_SIGNING_KEY" > /tmp/apk-key.pem
+          $APK mkndx --allow-untrusted --sign-key /tmp/apk-key.pem -o packages.adb *.apk
+          rm -f /tmp/apk-key.pem
           ls -lh packages.adb
 
       - name: Upload build artifacts
@@ -187,11 +187,11 @@ jobs:
 
       - name: Update packages
         run: |
+          rm -rf packages keys
           mkdir -p packages keys
-          rm -f packages/*device-timer*.apk packages/packages.adb
-          cp artifacts/*.apk packages/
-          cp artifacts/packages.adb packages/
-          cp artifacts/keys/* keys/ 2>/dev/null || true
+          cp artifacts/*.apk artifacts/packages.adb packages/
+          cp artifacts/keys/device-timer.pem keys/
+          cp artifacts/install.sh install.sh
           echo "Updated packages:"
           ls -lh packages/
 
@@ -199,6 +199,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/ keys/ index.html
-          git commit -m "update feed: ${{ github.ref_name }}" || echo "No changes to commit"
+          git add -A packages/ keys/ index.html install.sh
+          git diff --cached --quiet || git commit -m "update feed: ${{ github.ref_name }}"
           git push

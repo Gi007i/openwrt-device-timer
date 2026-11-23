@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.2] - 2026-11-23
+
+### Added
+- Install script for one-line setup
+
+### Changed
+- Build with OpenWRT SDK 25.12.6
+- Install exclusively through the signed package feed
+
+### Removed
+- Installation via LuCI package upload
+- Feed refresh during package installation
+
 ## [1.5.0] - 2026-04-10
 
 ### Changed
